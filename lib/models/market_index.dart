@@ -10,4 +10,18 @@ class MarketIndex {
   final String value;
   final String changeRate;
   final bool isPositive;
+
+  MarketIndex copyWith({
+    String? name,
+    String? value,
+    String? changeRate,
+    bool? isPositive,
+  }) {
+    return MarketIndex(
+      name: name ?? this.name,
+      value: value ?? this.value,
+      changeRate: changeRate ?? this.changeRate,
+      isPositive: isPositive ?? this.isPositive,
+    );
+  }
 }

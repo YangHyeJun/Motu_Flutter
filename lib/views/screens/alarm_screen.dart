@@ -13,12 +13,6 @@ class AlarmScreen extends ConsumerWidget {
     final notifier = ref.read(homeViewModelProvider.notifier);
     final state = ref.watch(homeViewModelProvider);
 
-    const alarms = [
-      ('삼성전자', '목표가 근접 알림이 도착했습니다.', '방금 전'),
-      ('AI 투자 조언', '2차전지 종목 변동성이 확대되었습니다.', '12분 전'),
-      ('공매도 순위', '카카오가 공매도 상위 3위로 진입했습니다.', '1시간 전'),
-    ];
-
     return Scaffold(
       appBar: AppBar(centerTitle: true, title: const Text('알림')),
       body: RefreshIndicator(
@@ -43,24 +37,21 @@ class AlarmScreen extends ConsumerWidget {
               ],
             ),
             const SizedBox(height: 8),
-            ...alarms.map(
-              (alarm) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: AppCard(
-                  child: ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const CircleAvatar(
-                      backgroundColor: AppColors.accentSoft,
-                      child: Icon(
-                        Icons.notifications_active_outlined,
-                        color: AppColors.accent,
-                      ),
-                    ),
-                    title: Text(alarm.$1),
-                    subtitle: Text('${alarm.$2}\n${alarm.$3}'),
-                    isThreeLine: true,
+            AppCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    state.accountSyncErrorMessage ?? '표시할 실제 알림 데이터가 없습니다.',
+                    style: Theme.of(context).textTheme.bodyMedium,
                   ),
-                ),
+                  const SizedBox(height: 12),
+                  TextButton.icon(
+                    onPressed: notifier.refreshAll,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('재시도'),
+                  ),
+                ],
               ),
             ),
           ],

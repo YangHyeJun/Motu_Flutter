@@ -1,0 +1,9 @@
+{
+  "KIS_APP_KEY": "your_app_key",
+  "KIS_APP_SECRET": "your_app_secret",
+  "KIS_ACCOUNT_MAIN_NO": "6393610301",
+  "KIS_ACCOUNT_MAIN_PRDT_CD": "",
+  "KIS_ACCOUNT_ISA_NO": "4329972901",
+  "KIS_ACCOUNT_ISA_PRDT_CD": "",
+  "KIS_USE_MOCK": false
+}

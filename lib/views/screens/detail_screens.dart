@@ -1,8 +1,13 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/network/kis_realtime_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/models.dart';
+import '../../providers/api_provider.dart';
 import '../../providers/home_provider.dart';
 import '../widgets/chart_widgets.dart';
 import '../widgets/common_widgets.dart';
@@ -25,7 +30,6 @@ class HoldingsDetailScreen extends ConsumerWidget {
           ),
         ],
       ),
-      bottomNavigationBar: const _BottomBar(currentIndex: 0),
       body: RefreshIndicator(
         onRefresh: ref.read(homeViewModelProvider.notifier).refreshAll,
         child: ListView(
@@ -41,7 +45,7 @@ class HoldingsDetailScreen extends ConsumerWidget {
               (stock) => InkWell(
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => StockDetailScreen(stock: stock),
+                    builder: (_) => StockDetailScreen.fromHolding(stock: stock),
                   ),
                 ),
                 child: Container(
@@ -120,7 +124,6 @@ class ShortSellDetailScreen extends ConsumerWidget {
           ),
         ],
       ),
-      bottomNavigationBar: const _BottomBar(currentIndex: 2),
       body: RefreshIndicator(
         onRefresh: ref.read(homeViewModelProvider.notifier).refreshAll,
         child: ListView(
@@ -138,52 +141,59 @@ class ShortSellDetailScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 12),
             ...rankings.map(
-              (stock) => Container(
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                decoration: const BoxDecoration(
-                  border: Border(bottom: BorderSide(color: AppColors.border)),
+              (stock) => InkWell(
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => StockDetailScreen.fromRanking(stock: stock),
+                  ),
                 ),
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 28,
-                      child: Text(
-                        '${stock.rank}',
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(color: AppColors.textSecondary),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  decoration: const BoxDecoration(
+                    border: Border(bottom: BorderSide(color: AppColors.border)),
+                  ),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 28,
+                        child: Text(
+                          '${stock.rank}',
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(color: AppColors.textSecondary),
+                        ),
                       ),
-                    ),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              stock.name,
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            Text(
+                              '(${stock.code})    ${stock.extraLabel}: ${stock.extraValue}',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
+                        ),
+                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Text(
-                            stock.name,
-                            style: Theme.of(context).textTheme.titleMedium,
+                            '${_currency(stock.price)}원',
+                            style: Theme.of(
+                              context,
+                            ).textTheme.titleMedium?.copyWith(fontSize: 18),
                           ),
-                          Text(
-                            '(${stock.code})    ${stock.extraLabel}: ${stock.extraValue}',
-                            style: Theme.of(context).textTheme.bodySmall,
+                          PercentageText(
+                            value: '${stock.changeRate.abs()}%',
+                            isPositive: stock.isPositive,
                           ),
                         ],
                       ),
-                    ),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Text(
-                          '${_currency(stock.price)}원',
-                          style: Theme.of(
-                            context,
-                          ).textTheme.titleMedium?.copyWith(fontSize: 18),
-                        ),
-                        PercentageText(
-                          value: '${stock.changeRate.abs()}%',
-                          isPositive: stock.isPositive,
-                        ),
-                      ],
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
@@ -194,28 +204,85 @@ class ShortSellDetailScreen extends ConsumerWidget {
   }
 }
 
-class StockDetailScreen extends ConsumerWidget {
-  const StockDetailScreen({super.key, required this.stock});
+class MarketIndexDetailScreen extends ConsumerStatefulWidget {
+  MarketIndexDetailScreen({
+    super.key,
+    required this.index,
+  }) : name = index.name,
+       currentValue = index.value,
+       changeRate = 0,
+       isPositive = index.isPositive;
 
-  final HoldingStock stock;
+  final MarketIndex index;
+  final String name;
+  final String currentValue;
+  final double changeRate;
+  final bool isPositive;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final chartPoints = ref.watch(homeViewModelProvider).chartPoints;
+  ConsumerState<MarketIndexDetailScreen> createState() => _MarketIndexDetailScreenState();
+}
+
+class _MarketIndexDetailScreenState extends ConsumerState<MarketIndexDetailScreen> {
+  StockChartPeriod _selectedPeriod = StockChartPeriod.oneDay;
+  late final KisRealtimeService _realtimeService;
+  StreamSubscription<KisRealtimeSnapshot>? _realtimeSubscription;
+  int? _realtimeValue;
+  double? _realtimeRate;
+
+  @override
+  void initState() {
+    super.initState();
+    _realtimeService = KisRealtimeService(ref.read(kisApiClientProvider));
+    _realtimeSubscription = _realtimeService.stream.listen(_handleRealtimeSnapshot);
+    _syncRealtimeSubscription();
+  }
+
+  @override
+  void dispose() {
+    _realtimeSubscription?.cancel();
+    _realtimeService.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = (
+      name: widget.name,
+      period: _selectedPeriod,
+    );
+    final detailAsync = ref.watch(marketIndexDetailProvider(query));
+    final detail = detailAsync.valueOrNull;
+    final displayValue = _realtimeValue != null
+        ? _formatCompactNumber(_realtimeValue!)
+        : detail?.currentValue ?? widget.currentValue;
+    final displayRate =
+        _realtimeRate ?? detail?.changeRate ?? _parseSignedPercent(widget.index.changeRate);
+    final displayPositive = detail?.isPositive ?? widget.isPositive;
+    final chartEntries = _mergeRealtimeChartEntries(
+      entries: detail?.chartEntries ?? const <StockChartEntry>[],
+      realtimePrice: _realtimeValue,
+      applyRealtime: _selectedPeriod == StockChartPeriod.oneDay && widget.name == '코스피',
+    );
+    final range = _chartRange(chartEntries);
+
+    Future<void> refreshDetail() async {
+      ref.invalidate(marketIndexDetailProvider(query));
+      await ref.read(marketIndexDetailProvider(query).future);
+    }
 
     return Scaffold(
       appBar: AppBar(
         actions: [
           IconButton(
-            onPressed: () =>
-                ref.read(homeViewModelProvider.notifier).refreshAll(),
+            onPressed: refreshDetail,
             icon: const Icon(Icons.refresh),
           ),
         ],
       ),
       body: SafeArea(
         child: RefreshIndicator(
-          onRefresh: ref.read(homeViewModelProvider.notifier).refreshAll,
+          onRefresh: refreshDetail,
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
@@ -228,67 +295,326 @@ class StockDetailScreen extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '${stock.name} (${stock.code})',
+                      widget.name,
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                     Text(
-                      '${_currency(stock.currentPrice)}원',
+                      displayValue,
                       style: Theme.of(context).textTheme.headlineSmall,
                     ),
                     const SizedBox(height: 8),
                     Row(
                       children: [
                         Text(
-                          '지난주보다 ',
+                          '전일 대비 ',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                        PercentageText(
+                          value:
+                              '${detail?.changeAmount ?? _formatSignedPercent(displayRate)} (${displayRate.abs().toStringAsFixed(2)}%)',
+                          isPositive: displayPositive,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 22),
+                    SizedBox(
+                      height: 250,
+                      child: AppCard(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '차트',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            const SizedBox(height: 12),
+                            Expanded(
+                              child: _ChartSection(
+                                chartEntries: chartEntries,
+                                isLoading: detailAsync.isLoading && detail == null,
+                                errorText: detailAsync.hasError ? '지수 차트 데이터를 불러오지 못했습니다.' : null,
+                                valueSuffix: '',
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    _PeriodRow(
+                      selectedPeriod: _selectedPeriod,
+                      onSelect: (period) async {
+                        setState(() {
+                          _selectedPeriod = period;
+                          _realtimeValue = null;
+                          _realtimeRate = null;
+                        });
+                        await _syncRealtimeSubscription();
+                      },
+                    ),
+                    const SizedBox(height: 18),
+                    _ChartRangeSummary(
+                      highLabel: '최고',
+                      highValue: range == null ? '-' : _formatCompactNumber(range.$1),
+                      lowLabel: '최저',
+                      lowValue: range == null ? '-' : _formatCompactNumber(range.$2),
+                    ),
+                    const SizedBox(height: 18),
+                    _IndexMetricRow(
+                      openValue: detail?.openValue ?? '-',
+                      highValue: detail?.highValue ?? '-',
+                      lowValue: detail?.lowValue ?? '-',
+                    ),
+                    const SizedBox(height: 18),
+                    SizedBox(
+                      height: 180,
+                      child: AppCard(
+                        child: _VolumeSection(
+                          entries: chartEntries,
+                          volume: detail?.volume ?? 0,
+                          isLoading: detailAsync.isLoading && detail == null,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _syncRealtimeSubscription() async {
+    if (_selectedPeriod == StockChartPeriod.oneDay && widget.name == '코스피') {
+      await _realtimeService.connect(domesticCodes: const [], includeKospi: true);
+      return;
+    }
+
+    _realtimeValue = null;
+    _realtimeRate = null;
+    await _realtimeService.disconnect(clearSnapshot: false);
+  }
+
+  void _handleRealtimeSnapshot(KisRealtimeSnapshot snapshot) {
+    if (!mounted || widget.name != '코스피' || _selectedPeriod != StockChartPeriod.oneDay) {
+      return;
+    }
+
+    final value = snapshot.kospiValue?.replaceAll(',', '');
+    final parsed = double.tryParse(value ?? '');
+    if (parsed == null) {
+      return;
+    }
+
+    setState(() {
+      _realtimeValue = parsed.round();
+      _realtimeRate = snapshot.kospiChangeRate;
+    });
+  }
+}
+
+class StockDetailScreen extends ConsumerStatefulWidget {
+  StockDetailScreen.fromHolding({
+    super.key,
+    required HoldingStock stock,
+  }) : name = stock.name,
+       code = stock.code,
+       currentPrice = stock.currentPrice,
+       changeRate = stock.profitRate,
+       isPositive = stock.isPositive,
+       averagePrice = stock.buyPrice,
+       quantity = stock.quantity;
+
+  StockDetailScreen.fromRanking({
+    super.key,
+    required RankingStock stock,
+  }) : name = stock.name,
+       code = stock.code,
+       currentPrice = stock.price,
+       changeRate = stock.changeRate,
+       isPositive = stock.isPositive,
+       averagePrice = null,
+       quantity = null;
+
+  final String name;
+  final String code;
+  final int currentPrice;
+  final double changeRate;
+  final bool isPositive;
+  final int? averagePrice;
+  final int? quantity;
+
+  @override
+  ConsumerState<StockDetailScreen> createState() => _StockDetailScreenState();
+}
+
+class _StockDetailScreenState extends ConsumerState<StockDetailScreen> {
+  StockChartPeriod _selectedPeriod = StockChartPeriod.oneDay;
+  late final KisRealtimeService _realtimeService;
+  StreamSubscription<KisRealtimeSnapshot>? _realtimeSubscription;
+  int? _realtimePrice;
+  double? _realtimeRate;
+
+  @override
+  void initState() {
+    super.initState();
+    _realtimeService = KisRealtimeService(ref.read(kisApiClientProvider));
+    _realtimeSubscription = _realtimeService.stream.listen(_handleRealtimeSnapshot);
+    _syncRealtimeSubscription();
+  }
+
+  @override
+  void dispose() {
+    _realtimeSubscription?.cancel();
+    _realtimeService.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = (
+      code: widget.code,
+      name: widget.name,
+      period: _selectedPeriod,
+    );
+    final detailAsync = ref.watch(stockDetailProvider(query));
+    final detail = detailAsync.valueOrNull;
+    final displayPrice = _realtimePrice ?? detail?.currentPrice ?? widget.currentPrice;
+    final displayRate = _realtimeRate ?? detail?.changeRate ?? widget.changeRate;
+    final displayPositive = displayRate >= 0;
+    final chartEntries = _mergeRealtimeChartEntries(
+      entries: detail?.chartEntries ?? const <StockChartEntry>[],
+      realtimePrice: _realtimePrice,
+      applyRealtime: _selectedPeriod == StockChartPeriod.oneDay,
+    );
+    final displayVolume = detail?.volume ?? 0;
+    final range = _chartRange(chartEntries);
+    final displayOpenPrice = detail?.openPrice ?? 0;
+    final displayHighPrice = math.max(detail?.highPrice ?? 0, range?.$1 ?? 0);
+    final displayLowPrice = detail?.lowPrice == null || detail!.lowPrice == 0
+        ? (range?.$2 ?? 0)
+        : math.min(detail.lowPrice, range?.$2 ?? detail.lowPrice);
+    final compareLabel = widget.averagePrice == null ? '전일 대비 ' : '내 평균 대비 ';
+    final compareAmount = widget.averagePrice == null
+        ? (displayPrice * (displayRate.abs() / 100)).round()
+        : (displayPrice - widget.averagePrice!).abs();
+
+    Future<void> refreshDetail() async {
+      ref.invalidate(stockDetailProvider(query));
+      await ref.read(stockDetailProvider(query).future);
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        actions: [
+          IconButton(
+            onPressed: () => refreshDetail(),
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: RefreshIndicator(
+          onRefresh: refreshDetail,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: MediaQuery.of(context).size.height - 120,
+              ),
+              child: IntrinsicHeight(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${widget.name} (${widget.code})',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    Text(
+                      '${_currency(displayPrice)}원',
+                      style: Theme.of(context).textTheme.headlineSmall,
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Text(
+                          compareLabel,
                           style: Theme.of(context).textTheme.bodyMedium
                               ?.copyWith(color: AppColors.textSecondary),
                         ),
                         PercentageText(
-                          value:
-                              '${_currency((stock.currentPrice - stock.buyPrice).abs())}원 (${stock.profitRate.abs()}%)',
-                          isPositive: stock.isPositive,
+                          value: '${_currency(compareAmount)}원 (${displayRate.abs().toStringAsFixed(2)}%)',
+                          isPositive: displayPositive,
                         ),
                         const Spacer(),
                         Text(
-                          '거래량: 12,345,678주\n거래대금: 965억',
+                          widget.quantity == null ? '일반 종목 상세 보기' : '보유수량: ${widget.quantity}주',
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
                     ),
                     const SizedBox(height: 18),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: const [
-                        _TabLabel('차트', true),
-                        _TabLabel('매수', false),
-                        _TabLabel('매도', false),
-                        _TabLabel('정보', false),
-                      ],
-                    ),
-                    const SizedBox(height: 22),
                     SizedBox(
-                      height: 220,
+                      height: 250,
                       child: AppCard(
-                        child: SizedBox.expand(
-                          child: StockLineChart(points: chartPoints),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '차트',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            const SizedBox(height: 12),
+                            Expanded(
+                              child: _ChartSection(
+                                chartEntries: chartEntries,
+                                isLoading: detailAsync.isLoading && detail == null,
+                                errorText: detailAsync.hasError ? '차트 데이터를 불러오지 못했습니다.' : null,
+                                valueSuffix: '원',
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
                     const SizedBox(height: 18),
-                    const _PeriodRow(),
+                    _PeriodRow(
+                      selectedPeriod: _selectedPeriod,
+                      onSelect: (period) async {
+                        setState(() {
+                          _selectedPeriod = period;
+                          _realtimePrice = null;
+                          _realtimeRate = null;
+                        });
+                        await _syncRealtimeSubscription();
+                      },
+                    ),
                     const SizedBox(height: 18),
-                    const SizedBox(
+                    _ChartRangeSummary(
+                      highLabel: '최고',
+                      highValue: range == null ? '-' : '${_currency(range.$1)}원',
+                      lowLabel: '최저',
+                      lowValue: range == null ? '-' : '${_currency(range.$2)}원',
+                    ),
+                    const SizedBox(height: 18),
+                    _PriceSummaryRow(
+                      openPrice: displayOpenPrice,
+                      highPrice: displayHighPrice,
+                      lowPrice: displayLowPrice,
+                    ),
+                    const SizedBox(height: 18),
+                    SizedBox(
                       height: 180,
                       child: AppCard(
-                        child: Align(
-                          alignment: Alignment.topLeft,
-                          child: Text(
-                            '거래량',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
+                        child: _VolumeSection(
+                          entries: chartEntries,
+                          volume: displayVolume,
+                          isLoading: detailAsync.isLoading && detail == null,
                         ),
                       ),
                     ),
@@ -321,6 +647,65 @@ class StockDetailScreen extends ConsumerWidget {
           ),
         ),
       ),
+    );
+  }
+
+  Future<void> _syncRealtimeSubscription() async {
+    if (_selectedPeriod == StockChartPeriod.oneDay) {
+      await _realtimeService.connect(
+        domesticCodes: [widget.code],
+        includeKospi: false,
+      );
+      return;
+    }
+
+    await _realtimeService.disconnect(clearSnapshot: false);
+  }
+
+  void _handleRealtimeSnapshot(KisRealtimeSnapshot snapshot) {
+    if (!mounted || _selectedPeriod != StockChartPeriod.oneDay) {
+      return;
+    }
+
+    final realtime = snapshot.domesticStockPrices[widget.code];
+    if (realtime == null) {
+      return;
+    }
+
+    setState(() {
+      _realtimePrice = realtime.currentPrice;
+      _realtimeRate = realtime.changeRate;
+    });
+  }
+}
+
+class _IndexMetricRow extends StatelessWidget {
+  const _IndexMetricRow({
+    required this.openValue,
+    required this.highValue,
+    required this.lowValue,
+  });
+
+  final String openValue;
+  final String highValue;
+  final String lowValue;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: _MetricCard(label: '시가', value: openValue),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _MetricCard(label: '고가', value: highValue),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _MetricCard(label: '저가', value: lowValue),
+        ),
+      ],
     );
   }
 }
@@ -364,105 +749,228 @@ class _PriceColumn extends StatelessWidget {
   }
 }
 
-class _PeriodRow extends StatelessWidget {
-  const _PeriodRow();
+class _ChartSection extends StatelessWidget {
+  const _ChartSection({
+    required this.chartEntries,
+    required this.isLoading,
+    required this.errorText,
+    required this.valueSuffix,
+  });
+
+  final List<StockChartEntry> chartEntries;
+  final bool isLoading;
+  final String? errorText;
+  final String valueSuffix;
 
   @override
   Widget build(BuildContext context) {
-    const periods = ['1일', '1주', '1달', '3달', '1년', '전체'];
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: periods.map((period) {
-        final selected = period == '1일';
-        return Container(
-          width: 48,
-          height: 32,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: selected ? Colors.black : const Color(0xFFF0F1F4),
-            borderRadius: BorderRadius.circular(8),
+    if (isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (chartEntries.isEmpty) {
+      return Center(
+        child: Text(
+          errorText ?? '차트 데이터가 없습니다.',
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+            color: AppColors.textSecondary,
           ),
-          child: Text(
-            period,
-            style: TextStyle(
-              color: selected ? Colors.white : AppColors.textSecondary,
-              fontWeight: FontWeight.w700,
+        ),
+      );
+    }
+
+    return SizedBox.expand(
+      child: StockLineChart(entries: chartEntries, valueSuffix: valueSuffix),
+    );
+  }
+}
+
+class _ChartRangeSummary extends StatelessWidget {
+  const _ChartRangeSummary({
+    required this.highLabel,
+    required this.highValue,
+    required this.lowLabel,
+    required this.lowValue,
+  });
+
+  final String highLabel;
+  final String highValue;
+  final String lowLabel;
+  final String lowValue;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: _MetricCard(label: highLabel, value: highValue),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _MetricCard(label: lowLabel, value: lowValue),
+        ),
+      ],
+    );
+  }
+}
+
+class _PriceSummaryRow extends StatelessWidget {
+  const _PriceSummaryRow({
+    required this.openPrice,
+    required this.highPrice,
+    required this.lowPrice,
+  });
+
+  final int openPrice;
+  final int highPrice;
+  final int lowPrice;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: _MetricCard(label: '시가', value: '${_currency(openPrice)}원'),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _MetricCard(label: '고가', value: '${_currency(highPrice)}원'),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: _MetricCard(label: '저가', value: '${_currency(lowPrice)}원'),
+        ),
+      ],
+    );
+  }
+}
+
+class _VolumeSection extends StatelessWidget {
+  const _VolumeSection({
+    required this.entries,
+    required this.volume,
+    required this.isLoading,
+  });
+
+  final List<StockChartEntry> entries;
+  final int volume;
+  final bool isLoading;
+
+  @override
+  Widget build(BuildContext context) {
+    if (isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              '거래량',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const Spacer(),
+            Text(
+              '${_currency(volume)}주',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Expanded(
+          child: entries.isEmpty
+              ? Center(
+                  child: Text(
+                    '거래량 데이터가 없습니다.',
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                )
+              : VolumeBarChart(entries: entries),
+        ),
+      ],
+    );
+  }
+}
+
+class _MetricCard extends StatelessWidget {
+  const _MetricCard({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7F7F8),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 6),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              value,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PeriodRow extends StatelessWidget {
+  const _PeriodRow({
+    required this.selectedPeriod,
+    required this.onSelect,
+  });
+
+  final StockChartPeriod selectedPeriod;
+  final ValueChanged<StockChartPeriod> onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: StockChartPeriod.values.map((period) {
+        final selected = period == selectedPeriod;
+        return GestureDetector(
+          onTap: () => onSelect(period),
+          child: Container(
+            width: 52,
+            height: 32,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: selected ? Colors.black : const Color(0xFFF0F1F4),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              period.label,
+              style: TextStyle(
+                color: selected ? Colors.white : AppColors.textSecondary,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
         );
       }).toList(),
-    );
-  }
-}
-
-class _TabLabel extends StatelessWidget {
-  const _TabLabel(this.label, this.selected);
-
-  final String label;
-  final bool selected;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      label,
-      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-        color: selected ? AppColors.textPrimary : AppColors.textSecondary,
-        fontWeight: FontWeight.w800,
-      ),
-    );
-  }
-}
-
-class _BottomBar extends StatelessWidget {
-  const _BottomBar({required this.currentIndex});
-
-  final int currentIndex;
-
-  @override
-  Widget build(BuildContext context) {
-    const items = [
-      (Icons.home_outlined, '홈'),
-      (Icons.show_chart, '주식'),
-      (Icons.menu, '더보기'),
-    ];
-
-    return SafeArea(
-      top: false,
-      child: Container(
-        height: 72,
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          border: Border(top: BorderSide(color: AppColors.border)),
-        ),
-        child: Row(
-          children: List.generate(items.length, (index) {
-            final selected = index == currentIndex;
-            return Expanded(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    items[index].$1,
-                    color: selected
-                        ? AppColors.accent
-                        : AppColors.textSecondary,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    items[index].$2,
-                    style: TextStyle(
-                      color: selected
-                          ? AppColors.accent
-                          : AppColors.textSecondary,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }),
-        ),
-      ),
     );
   }
 }
@@ -479,4 +987,82 @@ String _currency(int value) {
     }
   }
   return '${negative ? '-' : ''}${buffer.toString()}';
+}
+
+List<StockChartEntry> _mergeRealtimeChartEntries({
+  required List<StockChartEntry> entries,
+  required int? realtimePrice,
+  required bool applyRealtime,
+}) {
+  if (!applyRealtime || realtimePrice == null) {
+    return entries;
+  }
+
+  final nextEntries = List<StockChartEntry>.from(entries);
+  final now = DateTime.now();
+  final timeLabel =
+      '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+  final date =
+      '${now.year.toString().padLeft(4, '0')}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
+
+  final nextEntry = StockChartEntry(
+    date: date,
+    timeLabel: timeLabel,
+    closePrice: realtimePrice,
+    volume: nextEntries.isEmpty ? 0 : nextEntries.last.volume,
+  );
+
+  if (nextEntries.isEmpty) {
+    return [nextEntry];
+  }
+
+  if (nextEntries.last.timeLabel == timeLabel) {
+    nextEntries[nextEntries.length - 1] = nextEntry;
+  } else {
+    nextEntries.add(nextEntry);
+  }
+
+  return nextEntries;
+}
+
+(int, int)? _chartRange(List<StockChartEntry> entries) {
+  if (entries.isEmpty) {
+    return null;
+  }
+
+  var high = entries.first.closePrice;
+  var low = entries.first.closePrice;
+
+  for (final entry in entries) {
+    if (entry.closePrice > high) {
+      high = entry.closePrice;
+    }
+    if (entry.closePrice < low) {
+      low = entry.closePrice;
+    }
+  }
+
+  return (high, low);
+}
+
+String _formatCompactNumber(int value) {
+  final digits = value.toString();
+  final buffer = StringBuffer();
+  for (var i = 0; i < digits.length; i++) {
+    buffer.write(digits[i]);
+    final fromEnd = digits.length - i - 1;
+    if (fromEnd > 0 && fromEnd % 3 == 0) {
+      buffer.write(',');
+    }
+  }
+  return buffer.toString();
+}
+
+double _parseSignedPercent(String value) {
+  return double.tryParse(value.replaceAll('%', '').replaceAll('+', '').replaceAll(',', '')) ??
+      0.0;
+}
+
+String _formatSignedPercent(double value) {
+  return '${value >= 0 ? '+' : '-'}${value.abs().toStringAsFixed(2)}';
 }
