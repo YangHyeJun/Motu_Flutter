@@ -1,234 +1,222 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/network/kis_api_exception.dart';
+import '../core/network/kis_realtime_service.dart';
 import '../models/models.dart';
+import '../providers/api_provider.dart';
 import 'home_view_state.dart';
 
 class HomeViewModel extends Notifier<HomeViewState> {
+  StreamSubscription<KisRealtimeSnapshot>? _realtimeSubscription;
+
   @override
   HomeViewState build() {
-    return HomeViewState(
-      summary: const PortfolioSummary(
-        asset: 12340000,
-        invested: 10000000,
-        profitRate: 23.4,
-        profitAmount: 2340000,
-      ),
-      marketIndexes: const [
-        MarketIndex(
-          name: '코스피',
-          value: '2,587.34',
-          changeRate: '+0.75%',
-          isPositive: true,
-        ),
-        MarketIndex(
-          name: '코스닥',
-          value: '754.21',
-          changeRate: '-0.42%',
-          isPositive: false,
-        ),
-        MarketIndex(
-          name: '나스닥',
-          value: '16,847.12',
-          changeRate: '+1.23%',
-          isPositive: true,
-        ),
-      ],
-      domesticHoldings: const [
-        HoldingStock(
-          name: '삼성전자',
-          code: '005930',
-          quantity: 10,
-          buyPrice: 74500,
-          currentPrice: 78200,
-          evaluationAmount: 9384000,
-          profitAmount: 3984000,
-          profitRate: 42.4,
-          isPositive: true,
-        ),
-        HoldingStock(
-          name: '카카오',
-          code: '035720',
-          quantity: 30,
-          buyPrice: 42300,
-          currentPrice: 51200,
-          evaluationAmount: 1536000,
-          profitAmount: 267000,
-          profitRate: 12.8,
-          isPositive: true,
-        ),
-        HoldingStock(
-          name: '현대차',
-          code: '005380',
-          quantity: 1090,
-          buyPrice: 233200,
-          currentPrice: 218000,
-          evaluationAmount: 237620000,
-          profitAmount: -16568000,
-          profitRate: -7.8,
-          isPositive: false,
-        ),
-      ],
-      usHoldings: const [
-        HoldingStock(
-          name: 'Apple Inc.',
-          code: 'AAPL',
-          quantity: 3,
-          buyPrice: 175000,
-          currentPrice: 193523,
-          evaluationAmount: 580569,
-          profitAmount: 12195,
-          profitRate: 2.1,
-          isPositive: true,
-        ),
-        HoldingStock(
-          name: 'Tesla Inc.',
-          code: 'TSLA',
-          quantity: 2,
-          buyPrice: 252200,
-          currentPrice: 248500,
-          evaluationAmount: 497000,
-          profitAmount: -7600,
-          profitRate: -1.5,
-          isPositive: false,
-        ),
-      ],
-      shortSellRankings: const [
-        RankingStock(
-          rank: 1,
-          name: '삼성전자',
-          code: '005930',
-          price: 78200,
-          changeRate: 1.4,
-          extraLabel: '공매도량',
-          extraValue: '1.2M주',
-          isPositive: true,
-        ),
-        RankingStock(
-          rank: 2,
-          name: '카카오',
-          code: '035720',
-          price: 51200,
-          changeRate: -2.1,
-          extraLabel: '공매도량',
-          extraValue: '890K주',
-          isPositive: false,
-        ),
-        RankingStock(
-          rank: 3,
-          name: '현대차',
-          code: '005380',
-          price: 218000,
-          changeRate: -8.9,
-          extraLabel: '공매도량',
-          extraValue: '650K주',
-          isPositive: false,
-        ),
-        RankingStock(
-          rank: 4,
-          name: 'SK하이닉스',
-          code: '000660',
-          price: 142000,
-          changeRate: -1.38,
-          extraLabel: '공매도량',
-          extraValue: '780K주',
-          isPositive: false,
-        ),
-        RankingStock(
-          rank: 5,
-          name: 'NAVER',
-          code: '035420',
-          price: 168000,
-          changeRate: -3.3,
-          extraLabel: '공매도량',
-          extraValue: '530K주',
-          isPositive: false,
-        ),
-        RankingStock(
-          rank: 6,
-          name: 'LG에너지솔루션',
-          code: '373220',
-          price: 218000,
-          changeRate: -0.72,
-          extraLabel: '공매도량',
-          extraValue: '192K주',
-          isPositive: false,
-        ),
-        RankingStock(
-          rank: 7,
-          name: '삼성SDI',
-          code: '006400',
-          price: 182000,
-          changeRate: -1.9,
-          extraLabel: '공매도량',
-          extraValue: '1.2M주',
-          isPositive: false,
-        ),
-        RankingStock(
-          rank: 8,
-          name: '기아',
-          code: '000270',
-          price: 98000,
-          changeRate: -0.95,
-          extraLabel: '공매도량',
-          extraValue: '450K주',
-          isPositive: false,
-        ),
-      ],
-      tips: const [
-        TipCard(
-          title: '분산투자의 중요성',
-          description: '한 종목에 집중하기보다는 여러 종목에 분산하여 투자하면 리스크를 줄일 수 있습니다.',
-        ),
-        TipCard(
-          title: '장기투자 관점',
-          description: '단기적인 등락에 일희일비하지 말고, 기업의 펀더멘털을 보고 장기적으로 투자하세요.',
-        ),
-      ],
-      chartPoints: const [
-        0.18,
-        0.16,
-        0.31,
-        0.27,
-        0.30,
-        0.25,
-        0.14,
-        0.10,
-        0.08,
-        0.32,
-        0.12,
-        0.22,
-        0.58,
-        0.47,
-        0.66,
-        0.60,
-        0.73,
-        0.50,
-        0.57,
-        0.70,
-        0.55,
-        0.58,
-        0.72,
-        0.61,
-        0.79,
-        0.88,
-        0.80,
-        0.83,
-        0.71,
-        0.74,
-        0.62,
-        0.68,
-      ],
-      lastUpdated: DateTime.now(),
-    );
+    ref.watch(selectedAccountProvider);
+    _ensureRealtimeListener();
+    ref.onDispose(() {
+      _realtimeSubscription?.cancel();
+    });
+    final initialState = _buildInitialState();
+    Future<void>.microtask(_loadFromServer);
+    return initialState;
   }
 
   Future<void> refreshAll() async {
-    await Future<void>.delayed(const Duration(milliseconds: 700));
-    state = state.copyWith(lastUpdated: DateTime.now());
+    await _loadFromServer();
   }
 
   Future<void> refreshRealtimeSections() async {
-    await Future<void>.delayed(const Duration(milliseconds: 500));
-    state = state.copyWith(lastUpdated: DateTime.now());
+    await _loadFromServer();
+  }
+
+  HomeViewState _buildInitialState() {
+    return HomeViewState(
+      summary: const PortfolioSummary(
+        asset: 0,
+        invested: 0,
+        profitRate: 0,
+        profitAmount: 0,
+      ),
+      marketIndexes: const [],
+      domesticHoldings: const [],
+      usHoldings: const [],
+      shortSellRankings: const [],
+      tips: const [],
+      chartPoints: const [],
+      lastUpdated: DateTime.now(),
+      isSyncing: false,
+      syncStatus: HomeSyncStatus.idle,
+      accountSyncErrorTitle: null,
+      accountSyncErrorMessage: null,
+    );
+  }
+
+  Future<void> _loadFromServer() async {
+    final apiClient = ref.read(kisApiClientProvider);
+    final repository = ref.read(homeRepositoryProvider);
+    state = state.copyWith(
+      isSyncing: true,
+      syncStatus: HomeSyncStatus.authenticating,
+      clearAccountSyncErrorMessage: true,
+    );
+
+    try {
+      await apiClient.ensureAccessToken();
+    } on KisApiException catch (error) {
+      state = state.copyWith(
+        isSyncing: false,
+        syncStatus: HomeSyncStatus.idle,
+        accountSyncErrorTitle: '토큰 발급 실패',
+        accountSyncErrorMessage: _mapTokenError(error),
+        lastUpdated: DateTime.now(),
+      );
+      await _syncRealtimeSubscriptionSafely();
+      return;
+    } catch (_) {
+      state = state.copyWith(
+        isSyncing: false,
+        syncStatus: HomeSyncStatus.idle,
+        accountSyncErrorTitle: '토큰 발급 실패',
+        accountSyncErrorMessage: '인증 토큰 발급에 실패했습니다. 앱키와 시크릿을 확인해주세요.',
+        lastUpdated: DateTime.now(),
+      );
+      await _syncRealtimeSubscriptionSafely();
+      return;
+    }
+
+    state = state.copyWith(
+      isSyncing: true,
+      syncStatus: HomeSyncStatus.loadingAccount,
+      clearAccountSyncErrorMessage: true,
+    );
+
+    try {
+      final nextState = await repository.fetchHomeState(fallback: state);
+      if (nextState == null) {
+        state = state.copyWith(
+          isSyncing: false,
+          syncStatus: HomeSyncStatus.idle,
+          accountSyncErrorTitle: '계좌 설정 필요',
+          lastUpdated: DateTime.now(),
+          accountSyncErrorMessage: '계좌 연동 설정이 없습니다.',
+        );
+        await _syncRealtimeSubscriptionSafely();
+        return;
+      }
+
+      state = nextState.copyWith(
+        isSyncing: false,
+        syncStatus: HomeSyncStatus.idle,
+      );
+      await _syncRealtimeSubscriptionSafely();
+    } on KisApiException catch (error) {
+      state = state.copyWith(
+        isSyncing: false,
+        syncStatus: HomeSyncStatus.idle,
+        accountSyncErrorTitle: _mapAccountErrorTitle(error),
+        accountSyncErrorMessage: _mapAccountErrorMessage(error),
+        lastUpdated: DateTime.now(),
+      );
+      await _syncRealtimeSubscriptionSafely();
+    } catch (_) {
+      state = state.copyWith(
+        isSyncing: false,
+        syncStatus: HomeSyncStatus.idle,
+        accountSyncErrorTitle: '계좌 조회 실패',
+        accountSyncErrorMessage: '계좌 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.',
+        lastUpdated: DateTime.now(),
+      );
+      await _syncRealtimeSubscriptionSafely();
+    }
+  }
+
+  void _ensureRealtimeListener() {
+    if (_realtimeSubscription != null) {
+      return;
+    }
+
+    final realtimeService = ref.read(kisRealtimeServiceProvider);
+    _realtimeSubscription = realtimeService.stream.listen(_applyRealtimeSnapshot);
+  }
+
+  Future<void> _syncRealtimeSubscription() async {
+    final realtimeService = ref.read(kisRealtimeServiceProvider);
+    await realtimeService.connect(
+      domesticCodes: state.domesticHoldings.map((holding) => holding.code),
+    );
+  }
+
+  Future<void> _syncRealtimeSubscriptionSafely() async {
+    try {
+      await _syncRealtimeSubscription();
+    } catch (_) {
+      // Keep the initial REST data visible even if realtime socket setup fails.
+    }
+  }
+
+  String _mapTokenError(KisApiException error) {
+    if (error.statusCode == 401 || error.statusCode == 403) {
+      return '인증이 거절되었습니다. 앱키와 시크릿이 올바른지 확인해주세요.';
+    }
+    return error.message;
+  }
+
+  String _mapAccountErrorTitle(KisApiException error) {
+    if (error.apiCode == 'OPSQ2000' || error.message.contains('INVALID_CHECK_ACNO')) {
+      return '계좌 조회 실패';
+    }
+    if (error.statusCode == 401 || error.statusCode == 403) {
+      return '계좌 권한 확인 필요';
+    }
+    return '계좌 조회 실패';
+  }
+
+  String _mapAccountErrorMessage(KisApiException error) {
+    if (error.apiCode == 'OPSQ2000' || error.message.contains('INVALID_CHECK_ACNO')) {
+      return '선택한 계좌번호 또는 상품코드를 확인해주세요.';
+    }
+    if (error.statusCode == 401 || error.statusCode == 403) {
+      return '현재 계좌로 조회할 권한이 없거나 API 사용 설정이 필요합니다.';
+    }
+    return error.message;
+  }
+
+  void _applyRealtimeSnapshot(KisRealtimeSnapshot snapshot) {
+    final nextMarketIndexes = state.marketIndexes.map((index) {
+      if (index.name != '코스피' ||
+          snapshot.kospiValue == null ||
+          snapshot.kospiChangeRate == null ||
+          snapshot.kospiIsPositive == null) {
+        return index;
+      }
+
+      final rate = snapshot.kospiChangeRate!;
+      return index.copyWith(
+        value: snapshot.kospiValue!,
+        changeRate: '${rate >= 0 ? '+' : ''}${rate.toStringAsFixed(2)}%',
+        isPositive: snapshot.kospiIsPositive!,
+      );
+    }).toList(growable: false);
+
+    final nextDomesticHoldings = state.domesticHoldings.map((holding) {
+      final realtime = snapshot.domesticStockPrices[holding.code];
+      if (realtime == null) {
+        return holding;
+      }
+
+      return holding.applyRealtimePrice(
+        nextPrice: realtime.currentPrice,
+        nextProfitRate: realtime.changeRate,
+        nextIsPositive: realtime.isPositive,
+      );
+    }).toList(growable: false);
+
+    state = state.copyWith(
+      marketIndexes: nextMarketIndexes,
+      domesticHoldings: nextDomesticHoldings,
+      lastUpdated: DateTime.now(),
+    );
   }
 }
