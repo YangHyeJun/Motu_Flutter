@@ -18,6 +18,14 @@ class KisAccessToken {
     );
   }
 
+  Map<String, String> toJson() {
+    return {
+      'access_token': value,
+      'token_type': tokenType,
+      'access_token_token_expired': expiredAt.toIso8601String(),
+    };
+  }
+
   final String value;
   final String tokenType;
   final DateTime expiredAt;

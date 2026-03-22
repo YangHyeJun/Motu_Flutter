@@ -1,12 +1,18 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
 import 'kis_access_token.dart';
 import 'kis_api_config.dart';
 import 'kis_api_exception.dart';
 
 class KisApiClient {
   KisApiClient(this._config);
+
+  static const _tokenStorageKey = 'kis_access_token_v1';
+  static const _approvalKeyStorageKey = 'kis_approval_key_v1';
+  static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
 
   final KisApiConfig _config;
   final HttpClient _httpClient = HttpClient();
@@ -79,8 +85,9 @@ class KisApiClient {
       throw const KisApiException('KIS API 설정이 없습니다.');
     }
 
-    final cachedApprovalKey = _cachedApprovalKey;
+    final cachedApprovalKey = _cachedApprovalKey ?? await _secureStorage.read(key: _approvalKeyStorageKey);
     if (cachedApprovalKey != null && cachedApprovalKey.isNotEmpty) {
+      _cachedApprovalKey = cachedApprovalKey;
       return cachedApprovalKey;
     }
 
@@ -99,6 +106,7 @@ class KisApiClient {
     }
 
     _cachedApprovalKey = approvalKey;
+    await _secureStorage.write(key: _approvalKeyStorageKey, value: approvalKey);
     return approvalKey;
   }
 
@@ -116,6 +124,12 @@ class KisApiClient {
       return cachedToken;
     }
 
+    final storedToken = await _readStoredToken();
+    if (storedToken != null && !storedToken.isExpired) {
+      _cachedToken = storedToken;
+      return storedToken;
+    }
+
     final response = await post(
       path: '/oauth2/tokenP',
       body: {
@@ -127,6 +141,10 @@ class KisApiClient {
 
     final token = KisAccessToken.fromJson(response);
     _cachedToken = token;
+    await _secureStorage.write(
+      key: _tokenStorageKey,
+      value: jsonEncode(token.toJson()),
+    );
     return token;
   }
 
@@ -166,5 +184,23 @@ class KisApiClient {
     }
 
     return decodedBody;
+  }
+
+  Future<KisAccessToken?> _readStoredToken() async {
+    final raw = await _secureStorage.read(key: _tokenStorageKey);
+    if (raw == null || raw.isEmpty) {
+      return null;
+    }
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) {
+        return null;
+      }
+      return KisAccessToken.fromJson(decoded);
+    } catch (_) {
+      await _secureStorage.delete(key: _tokenStorageKey);
+      return null;
+    }
   }
 }
