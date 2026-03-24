@@ -254,6 +254,9 @@ class MarketIndexDetailRepository {
           return StockChartEntry(
             date: rawDate,
             timeLabel: intraday ? _formatTimeLabel(rawTime) : _formatDateLabel(rawTime),
+            openPrice: close.round(),
+            highPrice: close.round(),
+            lowPrice: close.round(),
             closePrice: close.round(),
             volume: volume,
           );
@@ -306,7 +309,12 @@ class MarketIndexDetailRepository {
       return value;
     }
 
-    return '${value.substring(0, 4)}.${value.substring(4, 6)}.${value.substring(6, 8)}';
+    final currentYear = DateTime.now().year.toString().padLeft(4, '0');
+    if (value.substring(0, 4) != currentYear) {
+      return '${value.substring(0, 4)}/${value.substring(4, 6)}/${value.substring(6, 8)}';
+    }
+
+    return '${value.substring(4, 6)}/${value.substring(6, 8)}';
   }
 
   String _formatNumberString(dynamic value) {

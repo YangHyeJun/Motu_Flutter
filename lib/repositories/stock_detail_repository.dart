@@ -104,6 +104,18 @@ class StockDetailRepository {
             (item) => StockChartEntry(
               date: item['stck_bsop_date'] as String? ?? '',
               timeLabel: _formatTimeLabel(item['stck_cntg_hour'] as String? ?? ''),
+              openPrice: _firstNonZeroInt([
+                item['stck_oprc'],
+                item['stck_prpr'],
+              ]),
+              highPrice: _firstNonZeroInt([
+                item['stck_hgpr'],
+                item['stck_prpr'],
+              ]),
+              lowPrice: _firstNonZeroInt([
+                item['stck_lwpr'],
+                item['stck_prpr'],
+              ]),
               closePrice: _toInt(item['stck_prpr']),
               volume: _toInt(item['cntg_vol']),
             ),
@@ -141,6 +153,18 @@ class StockDetailRepository {
           (item) => StockChartEntry(
             date: item['stck_bsop_date'] as String? ?? '',
             timeLabel: _formatDateLabel(item['stck_bsop_date'] as String? ?? ''),
+            openPrice: _firstNonZeroInt([
+              item['stck_oprc'],
+              item['stck_clpr'],
+            ]),
+            highPrice: _firstNonZeroInt([
+              item['stck_hgpr'],
+              item['stck_clpr'],
+            ]),
+            lowPrice: _firstNonZeroInt([
+              item['stck_lwpr'],
+              item['stck_clpr'],
+            ]),
             closePrice: _toInt(item['stck_clpr']),
             volume: _toInt(item['acml_vol']),
           ),
@@ -207,6 +231,17 @@ class StockDetailRepository {
     return int.tryParse('${value ?? ''}'.trim()) ?? 0;
   }
 
+  int _firstNonZeroInt(List<dynamic> values) {
+    for (final value in values) {
+      final parsed = _toInt(value);
+      if (parsed != 0) {
+        return parsed;
+      }
+    }
+
+    return 0;
+  }
+
   double _toDouble(dynamic value) {
     return double.tryParse('${value ?? ''}'.trim()) ?? 0.0;
   }
@@ -259,6 +294,11 @@ class StockDetailRepository {
   String _formatDateLabel(String value) {
     if (value.length != 8) {
       return value;
+    }
+
+    final currentYear = DateTime.now().year.toString().padLeft(4, '0');
+    if (value.substring(0, 4) != currentYear) {
+      return '${value.substring(0, 4)}/${value.substring(4, 6)}/${value.substring(6, 8)}';
     }
 
     return '${value.substring(4, 6)}/${value.substring(6, 8)}';

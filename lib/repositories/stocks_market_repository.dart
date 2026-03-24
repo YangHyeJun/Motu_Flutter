@@ -6,6 +6,41 @@ class StocksMarketRepository {
 
   final KisApiClient _apiClient;
 
+  Future<List<RankingStock>> searchStocks(String query) async {
+    final normalizedQuery = query.trim().toLowerCase();
+    if (normalizedQuery.isEmpty) {
+      return const [];
+    }
+
+    final responses = await Future.wait([
+      fetchDomesticStocks(sortByTradeAmount: true),
+      fetchDomesticStocks(sortByTradeAmount: false),
+      fetchOverseasStocks(sortByTradeAmount: true),
+      fetchOverseasStocks(sortByTradeAmount: false),
+    ]);
+
+    final byCode = <String, RankingStock>{};
+    for (final stocks in responses) {
+      for (final stock in stocks) {
+        if (!_matchesQuery(stock, normalizedQuery)) {
+          continue;
+        }
+        byCode.putIfAbsent(stock.code, () => stock);
+      }
+    }
+
+    final results = byCode.values.toList(growable: false);
+    results.sort((left, right) {
+      final scoreComparison = _score(right, normalizedQuery).compareTo(_score(left, normalizedQuery));
+      if (scoreComparison != 0) {
+        return scoreComparison;
+      }
+
+      return left.name.compareTo(right.name);
+    });
+    return results;
+  }
+
   Future<List<RankingStock>> fetchDomesticStocks({
     required bool sortByTradeAmount,
   }) async {
@@ -104,6 +139,31 @@ class StocksMarketRepository {
       default:
         return rate >= 0;
     }
+  }
+
+  bool _matchesQuery(RankingStock stock, String query) {
+    final name = stock.name.toLowerCase();
+    final code = stock.code.toLowerCase();
+    return name.contains(query) || code.contains(query);
+  }
+
+  int _score(RankingStock stock, String query) {
+    final name = stock.name.toLowerCase();
+    final code = stock.code.toLowerCase();
+
+    if (code == query) {
+      return 5;
+    }
+    if (name == query) {
+      return 4;
+    }
+    if (name.startsWith(query)) {
+      return 3;
+    }
+    if (code.startsWith(query)) {
+      return 2;
+    }
+    return 1;
   }
 
   String _formatNumber(int value) {

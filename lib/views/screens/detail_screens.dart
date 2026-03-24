@@ -320,8 +320,9 @@ class _MarketIndexDetailScreenState extends ConsumerState<MarketIndexDetailScree
                     ),
                     const SizedBox(height: 22),
                     SizedBox(
-                      height: 250,
+                      height: 300,
                       child: AppCard(
+                        padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -371,6 +372,7 @@ class _MarketIndexDetailScreenState extends ConsumerState<MarketIndexDetailScree
                     SizedBox(
                       height: 180,
                       child: AppCard(
+                        padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
                         child: _VolumeSection(
                           entries: chartEntries,
                           volume: detail?.volume ?? 0,
@@ -560,8 +562,9 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen> {
                     ),
                     const SizedBox(height: 18),
                     SizedBox(
-                      height: 250,
+                      height: 300,
                       child: AppCard(
+                        padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -611,6 +614,7 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen> {
                     SizedBox(
                       height: 180,
                       child: AppCard(
+                        padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
                         child: _VolumeSection(
                           entries: chartEntries,
                           volume: displayVolume,
@@ -1008,6 +1012,13 @@ List<StockChartEntry> _mergeRealtimeChartEntries({
   final nextEntry = StockChartEntry(
     date: date,
     timeLabel: timeLabel,
+    openPrice: nextEntries.isEmpty ? realtimePrice : nextEntries.last.openPrice,
+    highPrice: nextEntries.isEmpty
+        ? realtimePrice
+        : math.max(nextEntries.last.highPrice, realtimePrice),
+    lowPrice: nextEntries.isEmpty
+        ? realtimePrice
+        : math.min(nextEntries.last.lowPrice, realtimePrice),
     closePrice: realtimePrice,
     volume: nextEntries.isEmpty ? 0 : nextEntries.last.volume,
   );
@@ -1017,7 +1028,16 @@ List<StockChartEntry> _mergeRealtimeChartEntries({
   }
 
   if (nextEntries.last.timeLabel == timeLabel) {
-    nextEntries[nextEntries.length - 1] = nextEntry;
+    final previousEntry = nextEntries.last;
+    nextEntries[nextEntries.length - 1] = StockChartEntry(
+      date: date,
+      timeLabel: timeLabel,
+      openPrice: previousEntry.openPrice,
+      highPrice: math.max(previousEntry.highPrice, realtimePrice),
+      lowPrice: math.min(previousEntry.lowPrice, realtimePrice),
+      closePrice: realtimePrice,
+      volume: previousEntry.volume,
+    );
   } else {
     nextEntries.add(nextEntry);
   }
@@ -1030,15 +1050,15 @@ List<StockChartEntry> _mergeRealtimeChartEntries({
     return null;
   }
 
-  var high = entries.first.closePrice;
-  var low = entries.first.closePrice;
+  var high = entries.first.highPrice;
+  var low = entries.first.lowPrice;
 
   for (final entry in entries) {
-    if (entry.closePrice > high) {
-      high = entry.closePrice;
+    if (entry.highPrice > high) {
+      high = entry.highPrice;
     }
-    if (entry.closePrice < low) {
-      low = entry.closePrice;
+    if (entry.lowPrice < low) {
+      low = entry.lowPrice;
     }
   }
 

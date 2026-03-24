@@ -122,3 +122,10 @@ final marketStocksProvider = FutureProvider.autoDispose
         sortByTradeAmount: sortByTradeAmount,
       );
     });
+
+final stockSearchProvider = FutureProvider.autoDispose.family<List<RankingStock>, String>((
+  ref,
+  query,
+) {
+  return ref.watch(stocksMarketRepositoryProvider).searchStocks(query);
+});

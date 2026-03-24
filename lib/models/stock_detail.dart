@@ -91,12 +91,18 @@ class StockChartEntry {
   const StockChartEntry({
     required this.date,
     required this.timeLabel,
+    required this.openPrice,
+    required this.highPrice,
+    required this.lowPrice,
     required this.closePrice,
     required this.volume,
   });
 
   final String date;
   final String timeLabel;
+  final int openPrice;
+  final int highPrice;
+  final int lowPrice;
   final int closePrice;
   final int volume;
 }
