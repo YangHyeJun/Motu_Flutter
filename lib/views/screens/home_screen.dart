@@ -6,9 +6,7 @@ import '../../models/models.dart';
 import '../../providers/api_provider.dart';
 import '../../providers/home_provider.dart';
 import '../../viewmodels/home_view_state.dart';
-import '../widgets/chart_widgets.dart';
 import '../widgets/common_widgets.dart';
-import 'alarm_screen.dart';
 import 'detail_screens.dart';
 
 class HomeScreen extends ConsumerWidget {
@@ -36,13 +34,6 @@ class HomeScreen extends ConsumerWidget {
                         '모두투자',
                         style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontSize: 22),
                       ),
-                      const Spacer(),
-                      IconButton(
-                        onPressed: () => Navigator.of(
-                          context,
-                        ).push(MaterialPageRoute(builder: (_) => const AlarmScreen())),
-                        icon: const Icon(Icons.notifications_none, color: AppColors.textSecondary),
-                      ),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -54,21 +45,17 @@ class HomeScreen extends ConsumerWidget {
                     ),
                     const SizedBox(height: 12),
                   ],
-                  _ChipRow(),
-                  const SizedBox(height: 16),
                   _SummaryCard(
                     summary: state.summary,
-                    lastUpdated: state.lastUpdated,
-                    onRefresh: notifier.refreshRealtimeSections,
-                    isSyncing: state.isSyncing,
+                    sectionState: state.sectionState(HomeSection.summary),
+                    onRefresh: () => notifier.refreshSection(HomeSection.summary),
                     syncStatus: state.syncStatus,
                   ),
                   const SizedBox(height: 16),
                   _MarketSummaryCard(
                     indexes: state.marketIndexes,
-                    lastUpdated: state.lastUpdated,
-                    onRefresh: notifier.refreshRealtimeSections,
-                    isSyncing: state.isSyncing,
+                    sectionState: state.sectionState(HomeSection.market),
+                    onRefresh: () => notifier.refreshSection(HomeSection.market),
                     syncStatus: state.syncStatus,
                   ),
                   const SizedBox(height: 16),
@@ -83,8 +70,8 @@ class HomeScreen extends ConsumerWidget {
                     _HoldingsPreviewCard(
                       title: '국내 보유주식',
                       stocks: state.domesticHoldings,
-                      onRetry: notifier.refreshAll,
-                      isSyncing: state.isSyncing,
+                      sectionState: state.sectionState(HomeSection.domesticHoldings),
+                      onRetry: () => notifier.refreshSection(HomeSection.domesticHoldings),
                       onMore: state.domesticHoldings.isEmpty
                           ? null
                           : () => Navigator.of(context).push(
@@ -98,16 +85,16 @@ class HomeScreen extends ConsumerWidget {
                     _HoldingsPreviewCard(
                       title: '해외 보유주식',
                       stocks: state.usHoldings,
-                      onRetry: notifier.refreshAll,
-                      isSyncing: state.isSyncing,
+                      sectionState: state.sectionState(HomeSection.usHoldings),
+                      onRetry: () => notifier.refreshSection(HomeSection.usHoldings),
                       onMore: state.usHoldings.isEmpty ? null : () {},
                     ),
                   ],
                   const SizedBox(height: 16),
                   _ShortSellPreviewCard(
                     rankings: state.shortSellRankings.take(3).toList(),
-                    onRetry: notifier.refreshAll,
-                    isSyncing: state.isSyncing,
+                    sectionState: state.sectionState(HomeSection.shortSell),
+                    onRetry: () => notifier.refreshSection(HomeSection.shortSell),
                     onMore: state.shortSellRankings.isEmpty
                         ? null
                         : () => Navigator.of(context).push(
@@ -117,61 +104,11 @@ class HomeScreen extends ConsumerWidget {
                             ),
                           ),
                   ),
-                  const SizedBox(height: 16),
-                  _TipsCard(
-                    tips: state.tips,
-                    onRetry: notifier.refreshAll,
-                    isSyncing: state.isSyncing,
-                  ),
                 ]),
               ),
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _ChipRow extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    const chips = [
-      (Icons.trending_up, '급등 종목'),
-      (Icons.attach_money, '거래대금 상위'),
-      (Icons.psychology_outlined, 'AI 추천'),
-    ];
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: chips
-            .map(
-              (chip) => Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: AppColors.border),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(chip.$1, color: AppColors.textSecondary, size: 18),
-                      const SizedBox(width: 8),
-                      Text(
-                        chip.$2,
-                        style: Theme.of(
-                          context,
-                        ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            )
-            .toList(),
       ),
     );
   }
@@ -249,16 +186,14 @@ class _AccountSyncErrorBanner extends StatelessWidget {
 class _SummaryCard extends StatelessWidget {
   const _SummaryCard({
     required this.summary,
-    required this.lastUpdated,
+    required this.sectionState,
     required this.onRefresh,
-    required this.isSyncing,
     required this.syncStatus,
   });
 
   final PortfolioSummary summary;
-  final DateTime lastUpdated;
+  final HomeSectionSyncState sectionState;
   final Future<void> Function() onRefresh;
-  final bool isSyncing;
   final HomeSyncStatus syncStatus;
 
   @override
@@ -281,8 +216,7 @@ class _SummaryCard extends StatelessWidget {
               ),
               const Spacer(),
               _SectionRefreshStatus(
-                lastUpdated: lastUpdated,
-                isSyncing: isSyncing,
+                sectionState: sectionState,
                 syncStatus: syncStatus,
                 onRefresh: onRefresh,
               ),
@@ -328,12 +262,9 @@ class _SummaryCard extends StatelessWidget {
                         color: isPositive ? const Color(0xFF18AD5A) : AppColors.negative,
                       ),
                     ),
-                    const SizedBox(height: 12),
-                    Text('📈 최근 1주 수익률 변화', style: Theme.of(context).textTheme.bodySmall),
                   ],
                 ),
               ),
-              const MiniBarChart(),
             ],
           ),
         ],
@@ -369,7 +300,13 @@ class _IsaAccountNoticeCard extends StatelessWidget {
             ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary, height: 1.5),
           ),
           const SizedBox(height: 12),
-          _RetryButton(onRetry: onRetry, isSyncing: isSyncing),
+          _RetryButton(
+            onRetry: onRetry,
+            sectionState: HomeSectionSyncState(
+              lastUpdated: DateTime.now(),
+              isSyncing: isSyncing,
+            ),
+          ),
         ],
       ),
     );
@@ -379,16 +316,14 @@ class _IsaAccountNoticeCard extends StatelessWidget {
 class _MarketSummaryCard extends StatelessWidget {
   const _MarketSummaryCard({
     required this.indexes,
-    required this.lastUpdated,
+    required this.sectionState,
     required this.onRefresh,
-    required this.isSyncing,
     required this.syncStatus,
   });
 
   final List<MarketIndex> indexes;
-  final DateTime lastUpdated;
+  final HomeSectionSyncState sectionState;
   final Future<void> Function() onRefresh;
-  final bool isSyncing;
   final HomeSyncStatus syncStatus;
 
   @override
@@ -406,8 +341,7 @@ class _MarketSummaryCard extends StatelessWidget {
                 ),
               ),
               _SectionRefreshStatus(
-                lastUpdated: lastUpdated,
-                isSyncing: isSyncing,
+                sectionState: sectionState,
                 syncStatus: syncStatus,
                 onRefresh: onRefresh,
               ),
@@ -418,7 +352,7 @@ class _MarketSummaryCard extends StatelessWidget {
             _RetryEmptyState(
               message: '마켓 데이터를 불러오지 못했습니다.',
               onRetry: onRefresh,
-              isSyncing: isSyncing,
+              sectionState: sectionState,
             )
           else
             Row(
@@ -480,14 +414,14 @@ class _HoldingsPreviewCard extends StatelessWidget {
     required this.stocks,
     required this.onMore,
     required this.onRetry,
-    required this.isSyncing,
+    required this.sectionState,
   });
 
   final String title;
   final List<HoldingStock> stocks;
   final VoidCallback? onMore;
   final Future<void> Function() onRetry;
-  final bool isSyncing;
+  final HomeSectionSyncState sectionState;
 
   @override
   Widget build(BuildContext context) {
@@ -510,7 +444,7 @@ class _HoldingsPreviewCard extends StatelessWidget {
               child: _RetryEmptyState(
                 message: '$title 데이터를 불러오지 못했거나 지원하지 않는 계좌 유형입니다.',
                 onRetry: onRetry,
-                isSyncing: isSyncing,
+                sectionState: sectionState,
               ),
             )
           else
@@ -597,13 +531,13 @@ class _ShortSellPreviewCard extends StatelessWidget {
     required this.rankings,
     required this.onMore,
     required this.onRetry,
-    required this.isSyncing,
+    required this.sectionState,
   });
 
   final List<RankingStock> rankings;
   final VoidCallback? onMore;
   final Future<void> Function() onRetry;
-  final bool isSyncing;
+  final HomeSectionSyncState sectionState;
 
   @override
   Widget build(BuildContext context) {
@@ -627,7 +561,7 @@ class _ShortSellPreviewCard extends StatelessWidget {
               child: _RetryEmptyState(
                 message: '공매도 데이터를 불러오지 못했습니다.',
                 onRetry: onRetry,
-                isSyncing: isSyncing,
+                sectionState: sectionState,
               ),
             )
           else ...[
@@ -702,70 +636,16 @@ class _ShortSellPreviewCard extends StatelessWidget {
   }
 }
 
-class _TipsCard extends StatelessWidget {
-  const _TipsCard({
-    required this.tips,
-    required this.onRetry,
-    required this.isSyncing,
-  });
-
-  final List<TipCard> tips;
-  final Future<void> Function() onRetry;
-  final bool isSyncing;
-
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SectionHeader(title: '투자 팁 💡'),
-          const SizedBox(height: 14),
-          if (tips.isEmpty)
-            _RetryEmptyState(
-              message: '표시할 투자 팁이 없습니다.',
-              onRetry: onRetry,
-              isSyncing: isSyncing,
-            )
-          else
-            ...tips.map(
-              (tip) => Container(
-                width: double.infinity,
-                margin: const EdgeInsets.only(bottom: 10),
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF7F7F8),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(tip.title, style: Theme.of(context).textTheme.titleMedium),
-                    const SizedBox(height: 6),
-                    Text(
-                      tip.description,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(height: 1.5),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
 class _RetryEmptyState extends StatelessWidget {
   const _RetryEmptyState({
     required this.message,
     required this.onRetry,
-    required this.isSyncing,
+    required this.sectionState,
   });
 
   final String message;
   final Future<void> Function() onRetry;
-  final bool isSyncing;
+  final HomeSectionSyncState sectionState;
 
   @override
   Widget build(BuildContext context) {
@@ -773,11 +653,11 @@ class _RetryEmptyState extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          message,
+          sectionState.errorMessage ?? message,
           style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
         ),
         const SizedBox(height: 10),
-        _RetryButton(onRetry: onRetry, isSyncing: isSyncing),
+        _RetryButton(onRetry: onRetry, sectionState: sectionState),
       ],
     );
   }
@@ -785,20 +665,18 @@ class _RetryEmptyState extends StatelessWidget {
 
 class _SectionRefreshStatus extends StatelessWidget {
   const _SectionRefreshStatus({
-    required this.lastUpdated,
-    required this.isSyncing,
+    required this.sectionState,
     required this.syncStatus,
     required this.onRefresh,
   });
 
-  final DateTime lastUpdated;
-  final bool isSyncing;
+  final HomeSectionSyncState sectionState;
   final HomeSyncStatus syncStatus;
   final Future<void> Function() onRefresh;
 
   @override
   Widget build(BuildContext context) {
-    if (isSyncing) {
+    if (sectionState.isSyncing) {
       return Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -822,7 +700,7 @@ class _SectionRefreshStatus extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(_formatTime(lastUpdated), style: Theme.of(context).textTheme.bodySmall),
+        Text(_formatTime(sectionState.lastUpdated), style: Theme.of(context).textTheme.bodySmall),
         IconButton(
           onPressed: onRefresh,
           icon: const Icon(Icons.refresh, size: 20),
@@ -837,24 +715,35 @@ class _SectionRefreshStatus extends StatelessWidget {
 class _RetryButton extends StatelessWidget {
   const _RetryButton({
     required this.onRetry,
-    required this.isSyncing,
+    required this.sectionState,
   });
 
   final Future<void> Function() onRetry;
-  final bool isSyncing;
+  final HomeSectionSyncState sectionState;
 
   @override
   Widget build(BuildContext context) {
-    return TextButton.icon(
-      onPressed: isSyncing ? null : onRetry,
-      icon: isSyncing
-          ? const SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : const Icon(Icons.refresh),
-      label: Text(isSyncing ? '갱신 중' : '재시도'),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextButton.icon(
+          onPressed: sectionState.isSyncing ? null : onRetry,
+          icon: sectionState.isSyncing
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.refresh),
+          label: Text(sectionState.isSyncing ? '갱신 중' : '재시도'),
+        ),
+        Text(
+          '마지막 갱신 ${_formatTime(sectionState.lastUpdated)}',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: AppColors.textSecondary,
+          ),
+        ),
+      ],
     );
   }
 }
