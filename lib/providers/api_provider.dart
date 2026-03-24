@@ -87,11 +87,22 @@ final marketIndexDetailRepositoryProvider = Provider<MarketIndexDetailRepository
 
 final stockDetailProvider =
     FutureProvider.autoDispose
-        .family<StockDetail, ({String code, String name, StockChartPeriod period})>((ref, query) {
+        .family<
+          StockDetail,
+          ({
+            String code,
+            String name,
+            StockChartPeriod period,
+            StockMarketType marketType,
+            String? exchangeCode,
+          })
+        >((ref, query) {
       return ref.watch(stockDetailRepositoryProvider).fetchStockDetail(
             code: query.code,
             name: query.name,
             period: query.period,
+            marketType: query.marketType,
+            exchangeCode: query.exchangeCode,
           );
     });
 
@@ -110,16 +121,9 @@ final stocksMarketRepositoryProvider = Provider<StocksMarketRepository>((ref) {
 final marketStocksProvider = FutureProvider.autoDispose
     .family<List<RankingStock>, ({String market, String category})>((ref, query) {
       final repository = ref.watch(stocksMarketRepositoryProvider);
-      final sortByTradeAmount = query.category == 'tradeAmount';
-
-      if (query.market == 'overseas') {
-        return repository.fetchOverseasStocks(
-          sortByTradeAmount: sortByTradeAmount,
-        );
-      }
-
-      return repository.fetchDomesticStocks(
-        sortByTradeAmount: sortByTradeAmount,
+      return repository.fetchMarketStocks(
+        market: query.market,
+        category: query.category,
       );
     });
 
