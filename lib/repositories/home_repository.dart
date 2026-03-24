@@ -27,19 +27,19 @@ class HomeRepository {
     var usHoldings = fallback.usHoldings;
 
     try {
-      summary = await _fetchPortfolioSummary();
-      domesticHoldings = await _fetchDomesticHoldings();
+      summary = await fetchPortfolioSummary();
+      domesticHoldings = await fetchDomesticHoldings();
     } on KisApiException catch (error) {
       syncErrorMessage = _mapAccountSyncError(error);
     }
 
-    final marketIndexes = await _fetchMarketIndexes(fallback.marketIndexes);
-    final shortSellRankings = await _fetchShortSellRankings(
+    final marketIndexes = await fetchMarketIndexes(fallback.marketIndexes);
+    final shortSellRankings = await fetchShortSellRankings(
       fallback.shortSellRankings,
     );
 
     try {
-      usHoldings = await _fetchUsHoldings(fallback.usHoldings);
+      usHoldings = await fetchUsHoldings(fallback.usHoldings);
     } on KisApiException {
       // Overseas holdings can be unavailable even when the selected account itself is linked.
       usHoldings = fallback.usHoldings;
@@ -56,7 +56,7 @@ class HomeRepository {
     );
   }
 
-  Future<PortfolioSummary> _fetchPortfolioSummary() async {
+  Future<PortfolioSummary> fetchPortfolioSummary() async {
     final response = await _apiClient.get(
       path: '/uapi/domestic-stock/v1/trading/inquire-account-balance',
       trId: 'CTRP6548R',
@@ -82,7 +82,7 @@ class HomeRepository {
     );
   }
 
-  Future<List<HoldingStock>> _fetchDomesticHoldings() async {
+  Future<List<HoldingStock>> fetchDomesticHoldings() async {
     final response = await _apiClient.get(
       path: '/uapi/domestic-stock/v1/trading/inquire-balance',
       trId: _apiClient.useMockServer ? 'VTTC8434R' : 'TTTC8434R',
@@ -148,7 +148,7 @@ class HomeRepository {
     }
   }
 
-  Future<List<MarketIndex>> _fetchMarketIndexes(
+  Future<List<MarketIndex>> fetchMarketIndexes(
     List<MarketIndex> fallback,
   ) async {
     const targets = [
@@ -206,7 +206,7 @@ class HomeRepository {
     }
   }
 
-  Future<List<HoldingStock>> _fetchUsHoldings(List<HoldingStock> fallback) async {
+  Future<List<HoldingStock>> fetchUsHoldings(List<HoldingStock> fallback) async {
     const exchanges = [
       ('NASD', 'USD'),
       ('NYSE', 'USD'),
@@ -300,7 +300,7 @@ class HomeRepository {
     }
   }
 
-  Future<List<RankingStock>> _fetchShortSellRankings(
+  Future<List<RankingStock>> fetchShortSellRankings(
     List<RankingStock> fallback,
   ) async {
     try {

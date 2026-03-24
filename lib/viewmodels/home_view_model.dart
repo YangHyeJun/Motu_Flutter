@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/network/kis_api_client.dart';
 import '../core/network/kis_api_exception.dart';
 import '../core/network/kis_realtime_service.dart';
 import '../models/models.dart';
@@ -28,7 +29,25 @@ class HomeViewModel extends Notifier<HomeViewState> {
   }
 
   Future<void> refreshRealtimeSections() async {
-    await _loadFromServer();
+    await Future.wait([
+      refreshSection(HomeSection.summary),
+      refreshSection(HomeSection.market),
+    ]);
+  }
+
+  Future<void> refreshSection(HomeSection section) async {
+    switch (section) {
+      case HomeSection.summary:
+        return _refreshSummarySection();
+      case HomeSection.market:
+        return _refreshMarketSection();
+      case HomeSection.domesticHoldings:
+        return _refreshDomesticHoldingsSection();
+      case HomeSection.usHoldings:
+        return _refreshUsHoldingsSection();
+      case HomeSection.shortSell:
+        return _refreshShortSellSection();
+    }
   }
 
   HomeViewState _buildInitialState() {
@@ -43,45 +62,25 @@ class HomeViewModel extends Notifier<HomeViewState> {
       domesticHoldings: const [],
       usHoldings: const [],
       shortSellRankings: const [],
-      tips: const [],
-      chartPoints: const [],
       lastUpdated: DateTime.now(),
       isSyncing: false,
       syncStatus: HomeSyncStatus.idle,
       accountSyncErrorTitle: null,
       accountSyncErrorMessage: null,
+      sectionSyncStates: {
+        for (final section in HomeSection.values)
+          section: HomeSectionSyncState(
+            lastUpdated: DateTime.now(),
+            isSyncing: false,
+          ),
+      },
     );
   }
 
   Future<void> _loadFromServer() async {
     final apiClient = ref.read(kisApiClientProvider);
     final repository = ref.read(homeRepositoryProvider);
-    state = state.copyWith(
-      isSyncing: true,
-      syncStatus: HomeSyncStatus.authenticating,
-      clearAccountSyncErrorMessage: true,
-    );
-
-    try {
-      await apiClient.ensureAccessToken();
-    } on KisApiException catch (error) {
-      state = state.copyWith(
-        isSyncing: false,
-        syncStatus: HomeSyncStatus.idle,
-        accountSyncErrorTitle: '토큰 발급 실패',
-        accountSyncErrorMessage: _mapTokenError(error),
-        lastUpdated: DateTime.now(),
-      );
-      await _syncRealtimeSubscriptionSafely();
-      return;
-    } catch (_) {
-      state = state.copyWith(
-        isSyncing: false,
-        syncStatus: HomeSyncStatus.idle,
-        accountSyncErrorTitle: '토큰 발급 실패',
-        accountSyncErrorMessage: '인증 토큰 발급에 실패했습니다. 앱키와 시크릿을 확인해주세요.',
-        lastUpdated: DateTime.now(),
-      );
+    if (await _ensureConfigAndToken(apiClient) == false) {
       await _syncRealtimeSubscriptionSafely();
       return;
     }
@@ -109,6 +108,13 @@ class HomeViewModel extends Notifier<HomeViewState> {
       state = nextState.copyWith(
         isSyncing: false,
         syncStatus: HomeSyncStatus.idle,
+        sectionSyncStates: {
+          for (final section in HomeSection.values)
+            section: HomeSectionSyncState(
+              lastUpdated: nextState.lastUpdated,
+              isSyncing: false,
+            ),
+        },
       );
       await _syncRealtimeSubscriptionSafely();
     } on KisApiException catch (error) {
@@ -130,6 +136,210 @@ class HomeViewModel extends Notifier<HomeViewState> {
       );
       await _syncRealtimeSubscriptionSafely();
     }
+  }
+
+  Future<void> _refreshSummarySection() async {
+    if (await _ensureConfigAndToken(ref.read(kisApiClientProvider)) == false) {
+      return;
+    }
+
+    final repository = ref.read(homeRepositoryProvider);
+    _setSectionSyncing(HomeSection.summary, true);
+    try {
+      final summary = await repository.fetchPortfolioSummary();
+      final updatedAt = DateTime.now();
+      state = state.copyWith(
+        summary: summary,
+        lastUpdated: updatedAt,
+        sectionSyncStates: _updatedSectionState(
+          HomeSection.summary,
+          isSyncing: false,
+          lastUpdated: updatedAt,
+          clearErrorMessage: true,
+        ),
+      );
+    } on KisApiException catch (error) {
+      _setSectionError(HomeSection.summary, error.message);
+    } catch (_) {
+      _setSectionError(HomeSection.summary, '보유 자산을 다시 불러오지 못했습니다.');
+    }
+  }
+
+  Future<void> _refreshMarketSection() async {
+    if (await _ensureConfigAndToken(ref.read(kisApiClientProvider)) == false) {
+      return;
+    }
+
+    final repository = ref.read(homeRepositoryProvider);
+    _setSectionSyncing(HomeSection.market, true);
+    try {
+      final marketIndexes = await repository.fetchMarketIndexes(state.marketIndexes);
+      final updatedAt = DateTime.now();
+      state = state.copyWith(
+        marketIndexes: marketIndexes,
+        lastUpdated: updatedAt,
+        sectionSyncStates: _updatedSectionState(
+          HomeSection.market,
+          isSyncing: false,
+          lastUpdated: updatedAt,
+          clearErrorMessage: true,
+        ),
+      );
+    } catch (_) {
+      _setSectionError(HomeSection.market, '마켓 요약을 다시 불러오지 못했습니다.');
+    }
+  }
+
+  Future<void> _refreshDomesticHoldingsSection() async {
+    if (await _ensureConfigAndToken(ref.read(kisApiClientProvider)) == false) {
+      return;
+    }
+
+    final repository = ref.read(homeRepositoryProvider);
+    _setSectionSyncing(HomeSection.domesticHoldings, true);
+    try {
+      final holdings = await repository.fetchDomesticHoldings();
+      final updatedAt = DateTime.now();
+      state = state.copyWith(
+        domesticHoldings: holdings,
+        lastUpdated: updatedAt,
+        sectionSyncStates: _updatedSectionState(
+          HomeSection.domesticHoldings,
+          isSyncing: false,
+          lastUpdated: updatedAt,
+          clearErrorMessage: true,
+        ),
+      );
+      await _syncRealtimeSubscriptionSafely();
+    } on KisApiException catch (error) {
+      _setSectionError(HomeSection.domesticHoldings, error.message);
+    } catch (_) {
+      _setSectionError(HomeSection.domesticHoldings, '국내 보유주식을 다시 불러오지 못했습니다.');
+    }
+  }
+
+  Future<void> _refreshUsHoldingsSection() async {
+    if (await _ensureConfigAndToken(ref.read(kisApiClientProvider)) == false) {
+      return;
+    }
+
+    final repository = ref.read(homeRepositoryProvider);
+    _setSectionSyncing(HomeSection.usHoldings, true);
+    try {
+      final holdings = await repository.fetchUsHoldings(state.usHoldings);
+      final updatedAt = DateTime.now();
+      state = state.copyWith(
+        usHoldings: holdings,
+        lastUpdated: updatedAt,
+        sectionSyncStates: _updatedSectionState(
+          HomeSection.usHoldings,
+          isSyncing: false,
+          lastUpdated: updatedAt,
+          clearErrorMessage: true,
+        ),
+      );
+    } on KisApiException catch (error) {
+      _setSectionError(HomeSection.usHoldings, error.message);
+    } catch (_) {
+      _setSectionError(HomeSection.usHoldings, '해외 보유주식을 다시 불러오지 못했습니다.');
+    }
+  }
+
+  Future<void> _refreshShortSellSection() async {
+    if (await _ensureConfigAndToken(ref.read(kisApiClientProvider)) == false) {
+      return;
+    }
+
+    final repository = ref.read(homeRepositoryProvider);
+    _setSectionSyncing(HomeSection.shortSell, true);
+    try {
+      final rankings = await repository.fetchShortSellRankings(state.shortSellRankings);
+      final updatedAt = DateTime.now();
+      state = state.copyWith(
+        shortSellRankings: rankings,
+        lastUpdated: updatedAt,
+        sectionSyncStates: _updatedSectionState(
+          HomeSection.shortSell,
+          isSyncing: false,
+          lastUpdated: updatedAt,
+          clearErrorMessage: true,
+        ),
+      );
+    } catch (_) {
+      _setSectionError(HomeSection.shortSell, '공매도 순위를 다시 불러오지 못했습니다.');
+    }
+  }
+
+  Future<bool> _ensureConfigAndToken(KisApiClient apiClient) async {
+    state = state.copyWith(
+      isSyncing: true,
+      syncStatus: HomeSyncStatus.authenticating,
+      clearAccountSyncErrorMessage: true,
+    );
+
+    try {
+      await apiClient.ensureAccessToken();
+      state = state.copyWith(
+        isSyncing: false,
+        syncStatus: HomeSyncStatus.idle,
+      );
+      return true;
+    } on KisApiException catch (error) {
+      state = state.copyWith(
+        isSyncing: false,
+        syncStatus: HomeSyncStatus.idle,
+        accountSyncErrorTitle: '토큰 발급 실패',
+        accountSyncErrorMessage: _mapTokenError(error),
+        lastUpdated: DateTime.now(),
+      );
+      return false;
+    } catch (_) {
+      state = state.copyWith(
+        isSyncing: false,
+        syncStatus: HomeSyncStatus.idle,
+        accountSyncErrorTitle: '토큰 발급 실패',
+        accountSyncErrorMessage: '인증 토큰 발급에 실패했습니다. 앱키와 시크릿을 확인해주세요.',
+        lastUpdated: DateTime.now(),
+      );
+      return false;
+    }
+  }
+
+  void _setSectionSyncing(HomeSection section, bool isSyncing) {
+    state = state.copyWith(
+      sectionSyncStates: _updatedSectionState(
+        section,
+        isSyncing: isSyncing,
+        clearErrorMessage: isSyncing,
+      ),
+    );
+  }
+
+  void _setSectionError(HomeSection section, String message) {
+    state = state.copyWith(
+      sectionSyncStates: _updatedSectionState(
+        section,
+        isSyncing: false,
+        errorMessage: message,
+      ),
+    );
+  }
+
+  Map<HomeSection, HomeSectionSyncState> _updatedSectionState(
+    HomeSection section, {
+    DateTime? lastUpdated,
+    bool? isSyncing,
+    String? errorMessage,
+    bool clearErrorMessage = false,
+  }) {
+    final next = Map<HomeSection, HomeSectionSyncState>.from(state.sectionSyncStates);
+    next[section] = state.sectionState(section).copyWith(
+      lastUpdated: lastUpdated,
+      isSyncing: isSyncing,
+      errorMessage: errorMessage,
+      clearErrorMessage: clearErrorMessage,
+    );
+    return next;
   }
 
   void _ensureRealtimeListener() {

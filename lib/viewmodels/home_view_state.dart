@@ -6,6 +6,39 @@ enum HomeSyncStatus {
   loadingAccount,
 }
 
+enum HomeSection {
+  summary,
+  market,
+  domesticHoldings,
+  usHoldings,
+  shortSell,
+}
+
+class HomeSectionSyncState {
+  const HomeSectionSyncState({
+    required this.lastUpdated,
+    required this.isSyncing,
+    this.errorMessage,
+  });
+
+  final DateTime lastUpdated;
+  final bool isSyncing;
+  final String? errorMessage;
+
+  HomeSectionSyncState copyWith({
+    DateTime? lastUpdated,
+    bool? isSyncing,
+    String? errorMessage,
+    bool clearErrorMessage = false,
+  }) {
+    return HomeSectionSyncState(
+      lastUpdated: lastUpdated ?? this.lastUpdated,
+      isSyncing: isSyncing ?? this.isSyncing,
+      errorMessage: clearErrorMessage ? null : errorMessage ?? this.errorMessage,
+    );
+  }
+}
+
 class HomeViewState {
   const HomeViewState({
     required this.summary,
@@ -13,13 +46,12 @@ class HomeViewState {
     required this.domesticHoldings,
     required this.usHoldings,
     required this.shortSellRankings,
-    required this.tips,
-    required this.chartPoints,
     required this.lastUpdated,
     required this.isSyncing,
     required this.syncStatus,
     required this.accountSyncErrorTitle,
     required this.accountSyncErrorMessage,
+    required this.sectionSyncStates,
   });
 
   final PortfolioSummary summary;
@@ -27,13 +59,20 @@ class HomeViewState {
   final List<HoldingStock> domesticHoldings;
   final List<HoldingStock> usHoldings;
   final List<RankingStock> shortSellRankings;
-  final List<TipCard> tips;
-  final List<double> chartPoints;
   final DateTime lastUpdated;
   final bool isSyncing;
   final HomeSyncStatus syncStatus;
   final String? accountSyncErrorTitle;
   final String? accountSyncErrorMessage;
+  final Map<HomeSection, HomeSectionSyncState> sectionSyncStates;
+
+  HomeSectionSyncState sectionState(HomeSection section) {
+    return sectionSyncStates[section] ??
+        HomeSectionSyncState(
+          lastUpdated: lastUpdated,
+          isSyncing: false,
+        );
+  }
 
   HomeViewState copyWith({
     PortfolioSummary? summary,
@@ -41,13 +80,12 @@ class HomeViewState {
     List<HoldingStock>? domesticHoldings,
     List<HoldingStock>? usHoldings,
     List<RankingStock>? shortSellRankings,
-    List<TipCard>? tips,
-    List<double>? chartPoints,
     DateTime? lastUpdated,
     bool? isSyncing,
     HomeSyncStatus? syncStatus,
     String? accountSyncErrorTitle,
     String? accountSyncErrorMessage,
+    Map<HomeSection, HomeSectionSyncState>? sectionSyncStates,
     bool clearAccountSyncErrorMessage = false,
   }) {
     return HomeViewState(
@@ -56,8 +94,6 @@ class HomeViewState {
       domesticHoldings: domesticHoldings ?? this.domesticHoldings,
       usHoldings: usHoldings ?? this.usHoldings,
       shortSellRankings: shortSellRankings ?? this.shortSellRankings,
-      tips: tips ?? this.tips,
-      chartPoints: chartPoints ?? this.chartPoints,
       lastUpdated: lastUpdated ?? this.lastUpdated,
       isSyncing: isSyncing ?? this.isSyncing,
       syncStatus: syncStatus ?? this.syncStatus,
@@ -67,6 +103,7 @@ class HomeViewState {
       accountSyncErrorMessage: clearAccountSyncErrorMessage
           ? null
           : accountSyncErrorMessage ?? this.accountSyncErrorMessage,
+      sectionSyncStates: sectionSyncStates ?? this.sectionSyncStates,
     );
   }
 }

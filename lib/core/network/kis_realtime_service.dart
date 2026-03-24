@@ -4,6 +4,37 @@ import 'dart:io';
 
 import 'kis_api_client.dart';
 
+enum KisRealtimeConnectionStatus { disconnected, connecting, connected, failed }
+
+class KisRealtimeConnectionState {
+  const KisRealtimeConnectionState({
+    required this.status,
+    this.lastAttemptedAt,
+    this.lastConnectedAt,
+    this.errorMessage,
+  });
+
+  final KisRealtimeConnectionStatus status;
+  final DateTime? lastAttemptedAt;
+  final DateTime? lastConnectedAt;
+  final String? errorMessage;
+
+  KisRealtimeConnectionState copyWith({
+    KisRealtimeConnectionStatus? status,
+    DateTime? lastAttemptedAt,
+    DateTime? lastConnectedAt,
+    String? errorMessage,
+    bool clearErrorMessage = false,
+  }) {
+    return KisRealtimeConnectionState(
+      status: status ?? this.status,
+      lastAttemptedAt: lastAttemptedAt ?? this.lastAttemptedAt,
+      lastConnectedAt: lastConnectedAt ?? this.lastConnectedAt,
+      errorMessage: clearErrorMessage ? null : errorMessage ?? this.errorMessage,
+    );
+  }
+}
+
 class KisRealtimeSnapshot {
   const KisRealtimeSnapshot({
     required this.kospiValue,
@@ -42,23 +73,28 @@ class KisRealtimeService {
   final KisApiClient _apiClient;
   final StreamController<KisRealtimeSnapshot> _controller =
       StreamController<KisRealtimeSnapshot>.broadcast();
+  final StreamController<KisRealtimeConnectionState> _connectionController =
+      StreamController<KisRealtimeConnectionState>.broadcast();
 
   WebSocket? _socket;
   StreamSubscription<dynamic>? _socketSubscription;
   Set<String> _activeDomesticCodes = const <String>{};
+  KisRealtimeConnectionState _connectionState = const KisRealtimeConnectionState(
+    status: KisRealtimeConnectionStatus.disconnected,
+  );
 
   String? _kospiValue;
   double? _kospiChangeRate;
   bool? _kospiIsPositive;
-  final Map<String, RealtimeDomesticPrice> _domesticPriceByCode =
-      <String, RealtimeDomesticPrice>{};
+  final Map<String, RealtimeDomesticPrice> _domesticPriceByCode = <String, RealtimeDomesticPrice>{};
 
   Stream<KisRealtimeSnapshot> get stream => _controller.stream;
 
-  Future<void> connect({
-    required Iterable<String> domesticCodes,
-    bool includeKospi = true,
-  }) async {
+  Stream<KisRealtimeConnectionState> get connectionStateStream => _connectionController.stream;
+
+  KisRealtimeConnectionState get connectionState => _connectionState;
+
+  Future<void> connect({required Iterable<String> domesticCodes, bool includeKospi = true}) async {
     if (!_apiClient.isConfigured) {
       await disconnect();
       return;
@@ -69,18 +105,25 @@ class KisRealtimeService {
         .where((code) => code.isNotEmpty)
         .toSet();
 
-    final needsReconnect =
-        _socket == null || !_sameCodes(_activeDomesticCodes, nextDomesticCodes);
+    final needsReconnect = _socket == null || !_sameCodes(_activeDomesticCodes, nextDomesticCodes);
 
     if (!needsReconnect) {
       return;
     }
 
+    _updateConnectionState(
+      _connectionState.copyWith(
+        status: KisRealtimeConnectionStatus.connecting,
+        lastAttemptedAt: DateTime.now(),
+        clearErrorMessage: true,
+      ),
+    );
+
     await disconnect(clearSnapshot: false);
     _domesticPriceByCode.removeWhere((code, _) => !nextDomesticCodes.contains(code));
 
     try {
-      final approvalKey = await _apiClient.getApprovalKey();
+      final approvalKey = await _apiClient.getApprovalKey(forceRefresh: true);
       final endpoint = _apiClient.useMockServer
           ? 'ws://ops.koreainvestment.com:31000'
           : 'ws://ops.koreainvestment.com:21000';
@@ -93,29 +136,43 @@ class KisRealtimeService {
         _handleMessage,
         onDone: () {
           _socket = null;
+          _updateConnectionState(
+            _connectionState.copyWith(status: KisRealtimeConnectionStatus.disconnected),
+          );
         },
         onError: (_) {
           _socket = null;
+          _updateConnectionState(
+            _connectionState.copyWith(
+              status: KisRealtimeConnectionStatus.failed,
+              errorMessage: '실시간 연결이 끊어졌습니다.',
+            ),
+          );
         },
       );
 
       if (includeKospi) {
-        _sendSubscription(
-          approvalKey: approvalKey,
-          trId: _domesticIndexTrId,
-          trKey: _kospiCode,
-        );
+        _sendSubscription(approvalKey: approvalKey, trId: _domesticIndexTrId, trKey: _kospiCode);
       }
 
       for (final code in nextDomesticCodes) {
-        _sendSubscription(
-          approvalKey: approvalKey,
-          trId: _domesticTradeTrId,
-          trKey: code,
-        );
+        _sendSubscription(approvalKey: approvalKey, trId: _domesticTradeTrId, trKey: code);
       }
+      _updateConnectionState(
+        _connectionState.copyWith(
+          status: KisRealtimeConnectionStatus.connected,
+          lastConnectedAt: DateTime.now(),
+          clearErrorMessage: true,
+        ),
+      );
     } catch (_) {
       await disconnect(clearSnapshot: false);
+      _updateConnectionState(
+        _connectionState.copyWith(
+          status: KisRealtimeConnectionStatus.failed,
+          errorMessage: '실시간 연결에 실패했습니다. 다시 시도해주세요.',
+        ),
+      );
     }
   }
 
@@ -132,17 +189,20 @@ class KisRealtimeService {
       _kospiIsPositive = null;
       _domesticPriceByCode.clear();
     }
+
+    _updateConnectionState(
+      _connectionState.copyWith(status: KisRealtimeConnectionStatus.disconnected),
+    );
   }
 
   Future<void> dispose() async {
     await disconnect();
+    await _connectionController.close();
     await _controller.close();
   }
 
   void _handleMessage(dynamic rawMessage) {
-    final message = rawMessage is List<int>
-        ? utf8.decode(rawMessage)
-        : rawMessage.toString();
+    final message = rawMessage is List<int> ? utf8.decode(rawMessage) : rawMessage.toString();
 
     if (message.contains('PINGPONG')) {
       _socket?.add(message);
@@ -220,9 +280,7 @@ class KisRealtimeService {
         kospiValue: _kospiValue,
         kospiChangeRate: _kospiChangeRate,
         kospiIsPositive: _kospiIsPositive,
-        domesticStockPrices: Map<String, RealtimeDomesticPrice>.unmodifiable(
-          _domesticPriceByCode,
-        ),
+        domesticStockPrices: Map<String, RealtimeDomesticPrice>.unmodifiable(_domesticPriceByCode),
       ),
     );
   }
@@ -241,10 +299,7 @@ class KisRealtimeService {
           'content-type': 'utf-8',
         },
         'body': {
-          'input': {
-            'tr_id': trId,
-            'tr_key': trKey,
-          },
+          'input': {'tr_id': trId, 'tr_key': trKey},
         },
       }),
     );
@@ -262,6 +317,13 @@ class KisRealtimeService {
     }
 
     return true;
+  }
+
+  void _updateConnectionState(KisRealtimeConnectionState nextState) {
+    _connectionState = nextState;
+    if (!_connectionController.isClosed) {
+      _connectionController.add(nextState);
+    }
   }
 
   String _formatIndexValue(String rawValue) {
