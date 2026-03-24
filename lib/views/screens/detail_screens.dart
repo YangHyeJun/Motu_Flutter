@@ -227,20 +227,33 @@ class _MarketIndexDetailScreenState extends ConsumerState<MarketIndexDetailScree
   StockChartPeriod _selectedPeriod = StockChartPeriod.oneDay;
   late final KisRealtimeService _realtimeService;
   StreamSubscription<KisRealtimeSnapshot>? _realtimeSubscription;
+  StreamSubscription<KisRealtimeConnectionState>? _connectionSubscription;
   int? _realtimeValue;
   double? _realtimeRate;
+  KisRealtimeConnectionState _connectionState = const KisRealtimeConnectionState(
+    status: KisRealtimeConnectionStatus.disconnected,
+  );
 
   @override
   void initState() {
     super.initState();
     _realtimeService = KisRealtimeService(ref.read(kisApiClientProvider));
     _realtimeSubscription = _realtimeService.stream.listen(_handleRealtimeSnapshot);
+    _connectionSubscription = _realtimeService.connectionStateStream.listen((state) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _connectionState = state;
+      });
+    });
     _syncRealtimeSubscription();
   }
 
   @override
   void dispose() {
     _realtimeSubscription?.cancel();
+    _connectionSubscription?.cancel();
     _realtimeService.dispose();
     super.dispose();
   }
@@ -319,6 +332,14 @@ class _MarketIndexDetailScreenState extends ConsumerState<MarketIndexDetailScree
                       ],
                     ),
                     const SizedBox(height: 22),
+                    if (_selectedPeriod == StockChartPeriod.oneDay &&
+                        _connectionState.status != KisRealtimeConnectionStatus.connected) ...[
+                      _RealtimeConnectionBanner(
+                        connectionState: _connectionState,
+                        onRetry: _syncRealtimeSubscription,
+                      ),
+                      const SizedBox(height: 14),
+                    ],
                     SizedBox(
                       height: 300,
                       child: AppCard(
@@ -337,6 +358,7 @@ class _MarketIndexDetailScreenState extends ConsumerState<MarketIndexDetailScree
                                 isLoading: detailAsync.isLoading && detail == null,
                                 errorText: detailAsync.hasError ? '지수 차트 데이터를 불러오지 못했습니다.' : null,
                                 valueSuffix: '',
+                                valueFormatter: _formatCompactNumber,
                               ),
                             ),
                           ],
@@ -425,6 +447,10 @@ class StockDetailScreen extends ConsumerStatefulWidget {
     required HoldingStock stock,
   }) : name = stock.name,
        code = stock.code,
+       marketType = StockMarketType.domestic,
+       exchangeCode = null,
+       priceDecimals = 0,
+       currencySymbol = '원',
        currentPrice = stock.currentPrice,
        changeRate = stock.profitRate,
        isPositive = stock.isPositive,
@@ -436,6 +462,10 @@ class StockDetailScreen extends ConsumerStatefulWidget {
     required RankingStock stock,
   }) : name = stock.name,
        code = stock.code,
+       marketType = stock.marketType,
+       exchangeCode = stock.exchangeCode,
+       priceDecimals = stock.priceDecimals,
+       currencySymbol = stock.currencySymbol,
        currentPrice = stock.price,
        changeRate = stock.changeRate,
        isPositive = stock.isPositive,
@@ -444,6 +474,10 @@ class StockDetailScreen extends ConsumerStatefulWidget {
 
   final String name;
   final String code;
+  final StockMarketType marketType;
+  final String? exchangeCode;
+  final int priceDecimals;
+  final String currencySymbol;
   final int currentPrice;
   final double changeRate;
   final bool isPositive;
@@ -458,20 +492,33 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen> {
   StockChartPeriod _selectedPeriod = StockChartPeriod.oneDay;
   late final KisRealtimeService _realtimeService;
   StreamSubscription<KisRealtimeSnapshot>? _realtimeSubscription;
+  StreamSubscription<KisRealtimeConnectionState>? _connectionSubscription;
   int? _realtimePrice;
   double? _realtimeRate;
+  KisRealtimeConnectionState _connectionState = const KisRealtimeConnectionState(
+    status: KisRealtimeConnectionStatus.disconnected,
+  );
 
   @override
   void initState() {
     super.initState();
     _realtimeService = KisRealtimeService(ref.read(kisApiClientProvider));
     _realtimeSubscription = _realtimeService.stream.listen(_handleRealtimeSnapshot);
+    _connectionSubscription = _realtimeService.connectionStateStream.listen((state) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _connectionState = state;
+      });
+    });
     _syncRealtimeSubscription();
   }
 
   @override
   void dispose() {
     _realtimeSubscription?.cancel();
+    _connectionSubscription?.cancel();
     _realtimeService.dispose();
     super.dispose();
   }
@@ -482,6 +529,8 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen> {
       code: widget.code,
       name: widget.name,
       period: _selectedPeriod,
+      marketType: widget.marketType,
+      exchangeCode: widget.exchangeCode,
     );
     final detailAsync = ref.watch(stockDetailProvider(query));
     final detail = detailAsync.valueOrNull;
@@ -504,6 +553,9 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen> {
     final compareAmount = widget.averagePrice == null
         ? (displayPrice * (displayRate.abs() / 100)).round()
         : (displayPrice - widget.averagePrice!).abs();
+    final priceDecimals = detail?.priceDecimals ?? widget.priceDecimals;
+    final currencySymbol = detail?.currencySymbol ?? widget.currencySymbol;
+    final isOverseas = (detail?.marketType ?? widget.marketType) == StockMarketType.overseas;
 
     Future<void> refreshDetail() async {
       ref.invalidate(stockDetailProvider(query));
@@ -538,7 +590,11 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen> {
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                     Text(
-                      '${_currency(displayPrice)}원',
+                      _formatMoney(
+                        displayPrice,
+                        currencySymbol: currencySymbol,
+                        decimals: priceDecimals,
+                      ),
                       style: Theme.of(context).textTheme.headlineSmall,
                     ),
                     const SizedBox(height: 8),
@@ -550,7 +606,8 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen> {
                               ?.copyWith(color: AppColors.textSecondary),
                         ),
                         PercentageText(
-                          value: '${_currency(compareAmount)}원 (${displayRate.abs().toStringAsFixed(2)}%)',
+                          value:
+                              '${_formatMoney(compareAmount, currencySymbol: currencySymbol, decimals: priceDecimals)} (${displayRate.abs().toStringAsFixed(2)}%)',
                           isPositive: displayPositive,
                         ),
                         const Spacer(),
@@ -561,8 +618,17 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen> {
                       ],
                     ),
                     const SizedBox(height: 18),
+                    if (widget.marketType == StockMarketType.domestic &&
+                        _selectedPeriod == StockChartPeriod.oneDay &&
+                        _connectionState.status != KisRealtimeConnectionStatus.connected) ...[
+                      _RealtimeConnectionBanner(
+                        connectionState: _connectionState,
+                        onRetry: _syncRealtimeSubscription,
+                      ),
+                      const SizedBox(height: 14),
+                    ],
                     SizedBox(
-                      height: 300,
+                      height: 332,
                       child: AppCard(
                         padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
                         child: Column(
@@ -578,7 +644,12 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen> {
                                 chartEntries: chartEntries,
                                 isLoading: detailAsync.isLoading && detail == null,
                                 errorText: detailAsync.hasError ? '차트 데이터를 불러오지 못했습니다.' : null,
-                                valueSuffix: '원',
+                                valueSuffix: currencySymbol,
+                                valueFormatter: (value) => _formatMoney(
+                                  value,
+                                  currencySymbol: currencySymbol,
+                                  decimals: priceDecimals,
+                                ),
                               ),
                             ),
                           ],
@@ -600,15 +671,29 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen> {
                     const SizedBox(height: 18),
                     _ChartRangeSummary(
                       highLabel: '최고',
-                      highValue: range == null ? '-' : '${_currency(range.$1)}원',
+                      highValue: range == null
+                          ? '-'
+                          : _formatMoney(
+                              range.$1,
+                              currencySymbol: currencySymbol,
+                              decimals: priceDecimals,
+                            ),
                       lowLabel: '최저',
-                      lowValue: range == null ? '-' : '${_currency(range.$2)}원',
+                      lowValue: range == null
+                          ? '-'
+                          : _formatMoney(
+                              range.$2,
+                              currencySymbol: currencySymbol,
+                              decimals: priceDecimals,
+                            ),
                     ),
                     const SizedBox(height: 18),
                     _PriceSummaryRow(
                       openPrice: displayOpenPrice,
                       highPrice: displayHighPrice,
                       lowPrice: displayLowPrice,
+                      currencySymbol: currencySymbol,
+                      priceDecimals: priceDecimals,
                     ),
                     const SizedBox(height: 18),
                     SizedBox(
@@ -622,6 +707,18 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen> {
                         ),
                       ),
                     ),
+                    if (detail != null && detail.orderBook.isNotEmpty) ...[
+                      const SizedBox(height: 18),
+                      _OrderBookCard(
+                        orderBook: detail.orderBook,
+                        currencySymbol: currencySymbol,
+                        priceDecimals: priceDecimals,
+                      ),
+                    ],
+                    if (detail != null && detail.infoItems.isNotEmpty) ...[
+                      const SizedBox(height: 18),
+                      _InfoGridCard(items: detail.infoItems),
+                    ],
                     const Spacer(),
                     const SizedBox(height: 18),
                     SizedBox(
@@ -634,9 +731,9 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen> {
                             borderRadius: BorderRadius.circular(12),
                           ),
                         ),
-                        onPressed: () {},
-                        child: const Text(
-                          '구매하기',
+                        onPressed: isOverseas ? null : () {},
+                        child: Text(
+                          isOverseas ? '해외 종목 정보 보기' : '구매하기',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
@@ -655,7 +752,8 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen> {
   }
 
   Future<void> _syncRealtimeSubscription() async {
-    if (_selectedPeriod == StockChartPeriod.oneDay) {
+    if (widget.marketType == StockMarketType.domestic &&
+        _selectedPeriod == StockChartPeriod.oneDay) {
       await _realtimeService.connect(
         domesticCodes: [widget.code],
         includeKospi: false,
@@ -667,7 +765,9 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen> {
   }
 
   void _handleRealtimeSnapshot(KisRealtimeSnapshot snapshot) {
-    if (!mounted || _selectedPeriod != StockChartPeriod.oneDay) {
+    if (!mounted ||
+        widget.marketType != StockMarketType.domestic ||
+        _selectedPeriod != StockChartPeriod.oneDay) {
       return;
     }
 
@@ -680,6 +780,91 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen> {
       _realtimePrice = realtime.currentPrice;
       _realtimeRate = realtime.changeRate;
     });
+  }
+}
+
+class _RealtimeConnectionBanner extends StatelessWidget {
+  const _RealtimeConnectionBanner({
+    required this.connectionState,
+    required this.onRetry,
+  });
+
+  final KisRealtimeConnectionState connectionState;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final attemptedAt = connectionState.lastAttemptedAt;
+    final message = switch (connectionState.status) {
+      KisRealtimeConnectionStatus.connecting => '실시간 연결을 시도하고 있습니다.',
+      KisRealtimeConnectionStatus.failed => connectionState.errorMessage ?? '실시간 연결이 끊어졌습니다.',
+      KisRealtimeConnectionStatus.disconnected => '실시간 연결이 끊어졌습니다.',
+      KisRealtimeConnectionStatus.connected => '실시간 연결 중',
+    };
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF6E8),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFF3D3A1)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.wifi_tethering_error_rounded, color: Color(0xFFC27A11), size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  message,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: const Color(0xFF8F5B0D),
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (attemptedAt != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    '마지막 시도 ${_formatRetryTime(attemptedAt)}',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: const Color(0xFF8F5B0D),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: connectionState.status == KisRealtimeConnectionStatus.connecting
+                      ? null
+                      : onRetry,
+                  icon: connectionState.status == KisRealtimeConnectionStatus.connecting
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh, size: 18),
+                  label: Text(
+                    connectionState.status == KisRealtimeConnectionStatus.connecting
+                        ? '연결 중'
+                        : '다시 연결',
+                  ),
+                  style: TextButton.styleFrom(
+                    foregroundColor: const Color(0xFFC27A11),
+                    padding: EdgeInsets.zero,
+                    minimumSize: const Size(0, 0),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -759,12 +944,14 @@ class _ChartSection extends StatelessWidget {
     required this.isLoading,
     required this.errorText,
     required this.valueSuffix,
+    required this.valueFormatter,
   });
 
   final List<StockChartEntry> chartEntries;
   final bool isLoading;
   final String? errorText;
   final String valueSuffix;
+  final String Function(int value) valueFormatter;
 
   @override
   Widget build(BuildContext context) {
@@ -784,7 +971,11 @@ class _ChartSection extends StatelessWidget {
     }
 
     return SizedBox.expand(
-      child: StockLineChart(entries: chartEntries, valueSuffix: valueSuffix),
+      child: StockLineChart(
+        entries: chartEntries,
+        valueSuffix: valueSuffix,
+        valueFormatter: valueFormatter,
+      ),
     );
   }
 }
@@ -823,28 +1014,173 @@ class _PriceSummaryRow extends StatelessWidget {
     required this.openPrice,
     required this.highPrice,
     required this.lowPrice,
+    required this.currencySymbol,
+    required this.priceDecimals,
   });
 
   final int openPrice;
   final int highPrice;
   final int lowPrice;
+  final String currencySymbol;
+  final int priceDecimals;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
         Expanded(
-          child: _MetricCard(label: '시가', value: '${_currency(openPrice)}원'),
+          child: _MetricCard(
+            label: '시가',
+            value: _formatMoney(
+              openPrice,
+              currencySymbol: currencySymbol,
+              decimals: priceDecimals,
+            ),
+          ),
         ),
         const SizedBox(width: 10),
         Expanded(
-          child: _MetricCard(label: '고가', value: '${_currency(highPrice)}원'),
+          child: _MetricCard(
+            label: '고가',
+            value: _formatMoney(
+              highPrice,
+              currencySymbol: currencySymbol,
+              decimals: priceDecimals,
+            ),
+          ),
         ),
         const SizedBox(width: 10),
         Expanded(
-          child: _MetricCard(label: '저가', value: '${_currency(lowPrice)}원'),
+          child: _MetricCard(
+            label: '저가',
+            value: _formatMoney(
+              lowPrice,
+              currencySymbol: currencySymbol,
+              decimals: priceDecimals,
+            ),
+          ),
         ),
       ],
+    );
+  }
+}
+
+class _OrderBookCard extends StatelessWidget {
+  const _OrderBookCard({
+    required this.orderBook,
+    required this.currencySymbol,
+    required this.priceDecimals,
+  });
+
+  final List<StockOrderBookLevel> orderBook;
+  final String currencySymbol;
+  final int priceDecimals;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('호가', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 12),
+          ...orderBook.map((level) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '${_formatNumber(level.askVolume)}주',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      _formatMoney(
+                        level.askPrice,
+                        currencySymbol: currencySymbol,
+                        decimals: priceDecimals,
+                      ),
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: AppColors.negative,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      _formatMoney(
+                        level.bidPrice,
+                        currencySymbol: currencySymbol,
+                        decimals: priceDecimals,
+                      ),
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: AppColors.positive,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      '${_formatNumber(level.bidVolume)}주',
+                      textAlign: TextAlign.right,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+}
+
+class _InfoGridCard extends StatelessWidget {
+  const _InfoGridCard({required this.items});
+
+  final List<StockInfoItem> items;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('기본 정보', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 12),
+          ...items.map((item) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 7),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 92,
+                    child: Text(
+                      item.label,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      item.value,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
     );
   }
 }
@@ -993,6 +1329,44 @@ String _currency(int value) {
   return '${negative ? '-' : ''}${buffer.toString()}';
 }
 
+String _formatMoney(
+  int value, {
+  required String currencySymbol,
+  required int decimals,
+}) {
+  final negative = value < 0;
+  final scale = _pow10(decimals);
+  final absolute = value.abs();
+  final whole = decimals == 0 ? absolute : absolute ~/ scale;
+  final fraction = decimals == 0 ? '' : (absolute % scale).toString().padLeft(decimals, '0');
+  final numberText = _formatNumber(whole);
+  final amount = fraction.isEmpty ? numberText : '$numberText.$fraction';
+  final prefix = currencySymbol == '원' ? '' : currencySymbol;
+  final suffix = currencySymbol == '원' ? currencySymbol : '';
+  return '${negative ? '-' : ''}$prefix$amount$suffix';
+}
+
+String _formatNumber(int value) {
+  final digits = value.toString();
+  final buffer = StringBuffer();
+  for (var i = 0; i < digits.length; i++) {
+    buffer.write(digits[i]);
+    final fromEnd = digits.length - i - 1;
+    if (fromEnd > 0 && fromEnd % 3 == 0) {
+      buffer.write(',');
+    }
+  }
+  return buffer.toString();
+}
+
+int _pow10(int exponent) {
+  var result = 1;
+  for (var i = 0; i < exponent; i++) {
+    result *= 10;
+  }
+  return result;
+}
+
 List<StockChartEntry> _mergeRealtimeChartEntries({
   required List<StockChartEntry> entries,
   required int? realtimePrice,
@@ -1085,4 +1459,11 @@ double _parseSignedPercent(String value) {
 
 String _formatSignedPercent(double value) {
   return '${value >= 0 ? '+' : '-'}${value.abs().toStringAsFixed(2)}';
+}
+
+String _formatRetryTime(DateTime value) {
+  final hour = value.hour.toString().padLeft(2, '0');
+  final minute = value.minute.toString().padLeft(2, '0');
+  final second = value.second.toString().padLeft(2, '0');
+  return '$hour:$minute:$second';
 }
