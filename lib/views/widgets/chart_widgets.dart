@@ -2,41 +2,19 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../../core/theme/app_theme.dart';
 import '../../models/stock_detail.dart';
-
-class MiniBarChart extends StatelessWidget {
-  const MiniBarChart({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF5F5F7),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: const Text(
-        '차트 데이터 없음',
-        style: TextStyle(
-          color: AppColors.textSecondary,
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-}
 
 class StockLineChart extends StatefulWidget {
   const StockLineChart({
     super.key,
     required this.entries,
     this.valueSuffix = '원',
+    this.valueFormatter,
   });
 
   final List<StockChartEntry> entries;
   final String valueSuffix;
+  final String Function(int value)? valueFormatter;
 
   @override
   State<StockLineChart> createState() => _StockLineChartState();
@@ -87,10 +65,18 @@ class _StockLineChartState extends State<StockLineChart> {
                   left: math.max(8, math.min(selectedDx - 40, width - 88)),
                   top: 8,
                   child: _Tooltip(
-                    price: '${_formatNumber(selectedEntry.closePrice)}${widget.valueSuffix}',
+                    price: widget.valueFormatter != null
+                        ? widget.valueFormatter!(selectedEntry.closePrice)
+                        : '${_formatNumber(selectedEntry.closePrice)}${widget.valueSuffix}',
                     label: selectedEntry.timeLabel,
                   ),
                 ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: _AxisLabels(entries: widget.entries),
+              ),
             ],
           ),
         );
@@ -206,18 +192,9 @@ class _LineChartPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    const horizontalPadding = 24.0;
-    const topPadding = 28.0;
-    const bottomPadding = 24.0;
-    final borderPaint = Paint()
-      ..color = AppColors.border
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-    final borderRect = RRect.fromRectAndRadius(
-      Offset.zero & size,
-      const Radius.circular(12),
-    );
-    canvas.drawRRect(borderRect, borderPaint);
+    const horizontalPadding = 8.0;
+    const topPadding = 18.0;
+    const bottomPadding = 12.0;
 
     if (entries.isEmpty) {
       return;
@@ -303,18 +280,9 @@ class _VolumeBarChartPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    const horizontalPadding = 24.0;
-    const topPadding = 28.0;
-    const bottomPadding = 20.0;
-    final borderPaint = Paint()
-      ..color = AppColors.border
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-    final borderRect = RRect.fromRectAndRadius(
-      Offset.zero & size,
-      const Radius.circular(12),
-    );
-    canvas.drawRRect(borderRect, borderPaint);
+    const horizontalPadding = 8.0;
+    const topPadding = 18.0;
+    const bottomPadding = 12.0;
 
     if (entries.isEmpty) {
       return;
@@ -396,6 +364,50 @@ class _Tooltip extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _AxisLabels extends StatelessWidget {
+  const _AxisLabels({required this.entries});
+
+  final List<StockChartEntry> entries;
+
+  @override
+  Widget build(BuildContext context) {
+    if (entries.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final middleIndex = entries.length ~/ 2;
+    final labels = [
+      entries.first.timeLabel,
+      entries[middleIndex].timeLabel,
+      entries.last.timeLabel,
+    ];
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Row(
+        children: labels.map((label) {
+          return Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: label == labels.first
+                  ? TextAlign.left
+                  : label == labels.last
+                      ? TextAlign.right
+                      : TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: const Color(0xFF8B93A1),
+                fontSize: 11,
+              ),
+            ),
+          );
+        }).toList(growable: false),
       ),
     );
   }
