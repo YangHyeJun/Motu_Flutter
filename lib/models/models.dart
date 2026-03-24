@@ -5,4 +5,4 @@ export 'market_index_detail.dart';
 export 'portfolio_summary.dart';
 export 'ranking_stock.dart';
 export 'stock_detail.dart';
-export 'tip_card.dart';
+export 'stock_market_type.dart';

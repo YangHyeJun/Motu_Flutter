@@ -1,7 +1,10 @@
+import 'stock_market_type.dart';
+
 class StockDetail {
   const StockDetail({
     required this.name,
     required this.code,
+    required this.marketType,
     required this.currentPrice,
     required this.changeRate,
     required this.isPositive,
@@ -12,10 +15,17 @@ class StockDetail {
     required this.chartEntries,
     required this.availableBuyQuantity,
     required this.availableCash,
+    this.exchangeCode,
+    this.marketLabel = '',
+    this.currencySymbol = '원',
+    this.priceDecimals = 0,
+    this.orderBook = const [],
+    this.infoItems = const [],
   });
 
   final String name;
   final String code;
+  final StockMarketType marketType;
   final int currentPrice;
   final double changeRate;
   final bool isPositive;
@@ -26,6 +36,12 @@ class StockDetail {
   final List<StockChartEntry> chartEntries;
   final int availableBuyQuantity;
   final int availableCash;
+  final String? exchangeCode;
+  final String marketLabel;
+  final String currencySymbol;
+  final int priceDecimals;
+  final List<StockOrderBookLevel> orderBook;
+  final List<StockInfoItem> infoItems;
 
   List<double> get normalizedChartPoints {
     if (chartEntries.isEmpty) {
@@ -47,6 +63,7 @@ class StockDetail {
   StockDetail copyWith({
     String? name,
     String? code,
+    StockMarketType? marketType,
     int? currentPrice,
     double? changeRate,
     bool? isPositive,
@@ -57,10 +74,17 @@ class StockDetail {
     List<StockChartEntry>? chartEntries,
     int? availableBuyQuantity,
     int? availableCash,
+    String? exchangeCode,
+    String? marketLabel,
+    String? currencySymbol,
+    int? priceDecimals,
+    List<StockOrderBookLevel>? orderBook,
+    List<StockInfoItem>? infoItems,
   }) {
     return StockDetail(
       name: name ?? this.name,
       code: code ?? this.code,
+      marketType: marketType ?? this.marketType,
       currentPrice: currentPrice ?? this.currentPrice,
       changeRate: changeRate ?? this.changeRate,
       isPositive: isPositive ?? this.isPositive,
@@ -71,6 +95,12 @@ class StockDetail {
       chartEntries: chartEntries ?? this.chartEntries,
       availableBuyQuantity: availableBuyQuantity ?? this.availableBuyQuantity,
       availableCash: availableCash ?? this.availableCash,
+      exchangeCode: exchangeCode ?? this.exchangeCode,
+      marketLabel: marketLabel ?? this.marketLabel,
+      currencySymbol: currencySymbol ?? this.currencySymbol,
+      priceDecimals: priceDecimals ?? this.priceDecimals,
+      orderBook: orderBook ?? this.orderBook,
+      infoItems: infoItems ?? this.infoItems,
     );
   }
 }
@@ -105,4 +135,28 @@ class StockChartEntry {
   final int lowPrice;
   final int closePrice;
   final int volume;
+}
+
+class StockOrderBookLevel {
+  const StockOrderBookLevel({
+    required this.askPrice,
+    required this.askVolume,
+    required this.bidPrice,
+    required this.bidVolume,
+  });
+
+  final int askPrice;
+  final int askVolume;
+  final int bidPrice;
+  final int bidVolume;
+}
+
+class StockInfoItem {
+  const StockInfoItem({
+    required this.label,
+    required this.value,
+  });
+
+  final String label;
+  final String value;
 }
