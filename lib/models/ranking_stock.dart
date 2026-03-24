@@ -1,3 +1,5 @@
+import 'stock_market_type.dart';
+
 class RankingStock {
   const RankingStock({
     required this.rank,
@@ -8,6 +10,12 @@ class RankingStock {
     required this.extraLabel,
     required this.extraValue,
     required this.isPositive,
+    this.marketType = StockMarketType.domestic,
+    this.exchangeCode,
+    this.productTypeCode,
+    this.marketLabel = '',
+    this.currencySymbol = '원',
+    this.priceDecimals = 0,
   });
 
   final int rank;
@@ -18,4 +26,10 @@ class RankingStock {
   final String extraLabel;
   final String extraValue;
   final bool isPositive;
+  final StockMarketType marketType;
+  final String? exchangeCode;
+  final String? productTypeCode;
+  final String marketLabel;
+  final String currencySymbol;
+  final int priceDecimals;
 }
