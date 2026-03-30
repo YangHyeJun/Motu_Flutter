@@ -5,6 +5,7 @@ import '../../core/theme/app_theme.dart';
 import '../../models/models.dart';
 import '../../providers/api_provider.dart';
 import '../../providers/home_provider.dart';
+import '../../viewmodels/more_view_model.dart';
 import '../widgets/common_widgets.dart';
 
 class MoreScreen extends ConsumerWidget {
@@ -15,6 +16,7 @@ class MoreScreen extends ConsumerWidget {
     final accounts = ref.watch(availableAccountsProvider);
     final selectedAccount = ref.watch(selectedAccountProvider);
     final themeMode = ref.watch(themeModeProvider);
+    final moreViewModel = ref.watch(moreViewModelProvider);
 
     final items = [
       (
@@ -30,7 +32,11 @@ class MoreScreen extends ConsumerWidget {
         '추가 매수 시 평균단가와 손익 변화를 계산합니다',
         Icons.calculate_outlined,
         () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const AveragingDownStocksScreen()),
+          MaterialPageRoute(
+            builder: (_) => AveragingDownStocksScreen(
+              viewModel: moreViewModel,
+            ),
+          ),
         ),
       ),
     ];
@@ -78,14 +84,18 @@ class MoreScreen extends ConsumerWidget {
 }
 
 class AveragingDownStocksScreen extends ConsumerWidget {
-  const AveragingDownStocksScreen({super.key});
+  const AveragingDownStocksScreen({super.key, required this.viewModel});
+
+  final MoreViewModel viewModel;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(homeViewModelProvider);
     final notifier = ref.read(homeViewModelProvider.notifier);
-    final holdings = [...state.domesticHoldings, ...state.usHoldings]
-      ..sort((left, right) => left.name.compareTo(right.name));
+    final holdings = viewModel.sortedHoldings([
+      ...state.domesticHoldings,
+      ...state.usHoldings,
+    ]);
 
     return Scaffold(
       appBar: AppBar(centerTitle: true, title: const Text('보유 주식 물타기')),
@@ -135,13 +145,15 @@ class AveragingDownStocksScreen extends ConsumerWidget {
                       ),
                       title: Text(holding.name),
                       subtitle: Text(
-                        '${holding.quantity}주  •  평균 ${_formatHoldingPrice(holding.buyPrice, holding)}',
+                        '${holding.quantity}주  •  평균 ${viewModel.formatHoldingPrice(holding.buyPrice, holding)}',
                       ),
                       trailing: const Icon(Icons.chevron_right),
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (_) =>
-                              AveragingDownCalculatorScreen(stock: holding),
+                          builder: (_) => AveragingDownCalculatorScreen(
+                            stock: holding,
+                            viewModel: viewModel,
+                          ),
                         ),
                       ),
                     ),
@@ -156,9 +168,14 @@ class AveragingDownStocksScreen extends ConsumerWidget {
 }
 
 class AveragingDownCalculatorScreen extends StatefulWidget {
-  const AveragingDownCalculatorScreen({super.key, required this.stock});
+  const AveragingDownCalculatorScreen({
+    super.key,
+    required this.stock,
+    required this.viewModel,
+  });
 
   final HoldingStock stock;
+  final MoreViewModel viewModel;
 
   @override
   State<AveragingDownCalculatorScreen> createState() =>
@@ -201,31 +218,13 @@ class _AveragingDownCalculatorScreenState
   @override
   Widget build(BuildContext context) {
     final stock = widget.stock;
-    final additionalQuantity = _parsePositiveInt(_quantityController.text);
-    final additionalPrice = _parsePositiveInt(_priceController.text);
-    final targetAveragePrice = _parsePositiveInt(
-      _targetAveragePriceController.text,
-    );
-    final currentInvested = stock.buyPrice * stock.quantity;
-    final additionalInvested = additionalQuantity * additionalPrice;
-    final totalQuantity = stock.quantity + additionalQuantity;
-    final nextAveragePrice = totalQuantity == 0
-        ? 0
-        : ((currentInvested + additionalInvested) / totalQuantity).round();
-    final currentValuation = stock.currentPrice * totalQuantity;
-    final nextProfitAmount =
-        currentValuation - (currentInvested + additionalInvested);
-    final nextProfitRate = (currentInvested + additionalInvested) == 0
-        ? 0.0
-        : (nextProfitAmount / (currentInvested + additionalInvested)) * 100;
-    final breakEvenRate = stock.currentPrice <= 0
-        ? 0.0
-        : ((nextAveragePrice - stock.currentPrice) / stock.currentPrice) * 100;
-    final targetPlan = _buildTargetAveragePlan(
+    final calculation = widget.viewModel.buildAveragingDownCalculation(
       stock: stock,
-      targetAveragePrice: targetAveragePrice,
-      buyPrice: additionalPrice,
+      quantityText: _quantityController.text,
+      priceText: _priceController.text,
+      targetAveragePriceText: _targetAveragePriceController.text,
     );
+    final targetPlan = calculation.targetPlan;
 
     return Scaffold(
       appBar: AppBar(centerTitle: true, title: Text('${stock.name} 물타기')),
@@ -254,12 +253,18 @@ class _AveragingDownCalculatorScreenState
                   const SizedBox(height: 16),
                   _CalculatorStatRow(
                     label: '현재 평균단가',
-                    value: _formatHoldingPrice(stock.buyPrice, stock),
+                    value: widget.viewModel.formatHoldingPrice(
+                      stock.buyPrice,
+                      stock,
+                    ),
                   ),
                   const SizedBox(height: 10),
                   _CalculatorStatRow(
                     label: '현재가',
-                    value: _formatHoldingPrice(stock.currentPrice, stock),
+                    value: widget.viewModel.formatHoldingPrice(
+                      stock.currentPrice,
+                      stock,
+                    ),
                   ),
                   const SizedBox(height: 10),
                   _CalculatorStatRow(
@@ -321,24 +326,30 @@ class _AveragingDownCalculatorScreenState
                   const SizedBox(height: 14),
                   _CalculatorStatRow(
                     label: '추가 매수 금액',
-                    value: _formatHoldingPrice(additionalInvested, stock),
+                    value: widget.viewModel.formatHoldingPrice(
+                      calculation.additionalInvested,
+                      stock,
+                    ),
                   ),
                   const SizedBox(height: 10),
                   _CalculatorStatRow(
                     label: '총 보유 수량',
-                    value: '$totalQuantity주',
+                    value: '${calculation.totalQuantity}주',
                   ),
                   const SizedBox(height: 10),
                   _CalculatorStatRow(
                     label: '새 평균단가',
-                    value: _formatHoldingPrice(nextAveragePrice, stock),
+                    value: widget.viewModel.formatHoldingPrice(
+                      calculation.nextAveragePrice,
+                      stock,
+                    ),
                   ),
                   const SizedBox(height: 10),
                   _CalculatorStatRow(
                     label: '현재가 기준 손익',
                     value:
-                        '${nextProfitAmount >= 0 ? '+' : '-'}${_formatHoldingPrice(nextProfitAmount.abs(), stock)}',
-                    valueColor: nextProfitAmount >= 0
+                        '${calculation.nextProfitAmount >= 0 ? '+' : '-'}${widget.viewModel.formatHoldingPrice(calculation.nextProfitAmount.abs(), stock)}',
+                    valueColor: calculation.nextProfitAmount >= 0
                         ? AppColors.positive
                         : AppColors.negative,
                   ),
@@ -346,8 +357,8 @@ class _AveragingDownCalculatorScreenState
                   _CalculatorStatRow(
                     label: '현재가 기준 수익률',
                     value:
-                        '${nextProfitRate >= 0 ? '+' : '-'}${nextProfitRate.abs().toStringAsFixed(2)}%',
-                    valueColor: nextProfitRate >= 0
+                        '${calculation.nextProfitRate >= 0 ? '+' : '-'}${calculation.nextProfitRate.abs().toStringAsFixed(2)}%',
+                    valueColor: calculation.nextProfitRate >= 0
                         ? AppColors.positive
                         : AppColors.negative,
                   ),
@@ -355,8 +366,8 @@ class _AveragingDownCalculatorScreenState
                   _CalculatorStatRow(
                     label: '본전까지 필요 등락률',
                     value:
-                        '${breakEvenRate >= 0 ? '+' : '-'}${breakEvenRate.abs().toStringAsFixed(2)}%',
-                    valueColor: breakEvenRate <= 0
+                        '${calculation.breakEvenRate >= 0 ? '+' : '-'}${calculation.breakEvenRate.abs().toStringAsFixed(2)}%',
+                    valueColor: calculation.breakEvenRate <= 0
                         ? AppColors.positive
                         : AppColors.negative,
                   ),
@@ -386,7 +397,7 @@ class _AveragingDownCalculatorScreenState
                     const SizedBox(height: 10),
                     _CalculatorStatRow(
                       label: '예상 매수 금액',
-                      value: _formatHoldingPrice(
+                      value: widget.viewModel.formatHoldingPrice(
                         targetPlan.requiredAmount,
                         stock,
                       ),
@@ -394,7 +405,7 @@ class _AveragingDownCalculatorScreenState
                     const SizedBox(height: 10),
                     _CalculatorStatRow(
                       label: '예상 새 평균단가',
-                      value: _formatHoldingPrice(
+                      value: widget.viewModel.formatHoldingPrice(
                         targetPlan.estimatedAveragePrice,
                         stock,
                       ),
@@ -432,20 +443,6 @@ class _AveragingDownCalculatorScreenState
       currentFocus.unfocus();
     }
   }
-}
-
-class _TargetAveragePlan {
-  const _TargetAveragePlan({
-    required this.requiredQuantity,
-    required this.requiredAmount,
-    required this.estimatedAveragePrice,
-    this.message,
-  });
-
-  final int requiredQuantity;
-  final int requiredAmount;
-  final int estimatedAveragePrice;
-  final String? message;
 }
 
 class _CalculatorStatRow extends StatelessWidget {
@@ -638,96 +635,6 @@ class _ThemeModeCard extends StatelessWidget {
       ),
     );
   }
-}
-
-String _formatHoldingPrice(int amount, HoldingStock stock) {
-  if (stock.marketType == StockMarketType.overseas) {
-    return '₩${_formatWithComma(amount)}';
-  }
-  return '₩${_formatWithComma(amount)}';
-}
-
-_TargetAveragePlan _buildTargetAveragePlan({
-  required HoldingStock stock,
-  required int targetAveragePrice,
-  required int buyPrice,
-}) {
-  if (targetAveragePrice <= 0) {
-    return const _TargetAveragePlan(
-      requiredQuantity: 0,
-      requiredAmount: 0,
-      estimatedAveragePrice: 0,
-      message: '목표 평균단가를 입력하면 필요한 매수 수량과 금액을 계산합니다.',
-    );
-  }
-
-  if (buyPrice <= 0) {
-    return const _TargetAveragePlan(
-      requiredQuantity: 0,
-      requiredAmount: 0,
-      estimatedAveragePrice: 0,
-      message: '추가 매수 단가를 먼저 입력해 주세요.',
-    );
-  }
-
-  if (targetAveragePrice >= stock.buyPrice) {
-    return const _TargetAveragePlan(
-      requiredQuantity: 0,
-      requiredAmount: 0,
-      estimatedAveragePrice: 0,
-      message: '목표 평균단가는 현재 평균단가보다 낮게 입력해야 합니다.',
-    );
-  }
-
-  if (buyPrice >= targetAveragePrice) {
-    return const _TargetAveragePlan(
-      requiredQuantity: 0,
-      requiredAmount: 0,
-      estimatedAveragePrice: 0,
-      message: '지정한 매수 단가가 목표 평균단가 이상이면 물타기로 도달할 수 없습니다.',
-    );
-  }
-
-  final numerator = stock.quantity * (stock.buyPrice - targetAveragePrice);
-  final denominator = targetAveragePrice - buyPrice;
-  if (denominator <= 0) {
-    return const _TargetAveragePlan(
-      requiredQuantity: 0,
-      requiredAmount: 0,
-      estimatedAveragePrice: 0,
-      message: '입력한 조건으로는 계산할 수 없습니다.',
-    );
-  }
-
-  final requiredQuantity = (numerator / denominator).ceil();
-  final requiredAmount = requiredQuantity * buyPrice;
-  final totalQuantity = stock.quantity + requiredQuantity;
-  final estimatedAveragePrice = totalQuantity == 0
-      ? 0
-      : ((stock.buyPrice * stock.quantity) + requiredAmount) ~/ totalQuantity;
-
-  return _TargetAveragePlan(
-    requiredQuantity: requiredQuantity,
-    requiredAmount: requiredAmount,
-    estimatedAveragePrice: estimatedAveragePrice,
-  );
-}
-
-int _parsePositiveInt(String value) {
-  return int.tryParse(value.replaceAll(',', '').trim()) ?? 0;
-}
-
-String _formatWithComma(int value) {
-  final digits = value.toString();
-  final buffer = StringBuffer();
-  for (var i = 0; i < digits.length; i++) {
-    buffer.write(digits[i]);
-    final fromEnd = digits.length - i - 1;
-    if (fromEnd > 0 && fromEnd % 3 == 0) {
-      buffer.write(',');
-    }
-  }
-  return buffer.toString();
 }
 
 class _ThemeModeChip extends StatelessWidget {

@@ -13,6 +13,11 @@ class StocksScreenViewModel extends Notifier<StocksScreenViewState> {
 
   late final StocksMarketRepository _stocksMarketRepository;
   late final KisRealtimeService _realtimeService;
+  StreamSubscription<KisRealtimeSnapshot>? _realtimeSubscription;
+  StreamSubscription<KisRealtimeConnectionState>? _connectionSubscription;
+  Timer? _visibleQuoteRefreshTimer;
+  String? _subscriptionOwnerId;
+  List<RankingStock> _visibleStocks = const <RankingStock>[];
 
   void bind({
     required StocksMarketRepository stocksMarketRepository,
@@ -28,6 +33,11 @@ class StocksScreenViewModel extends Notifier<StocksScreenViewState> {
       stocksMarketRepository: ref.read(stocksMarketRepositoryProvider),
       realtimeService: ref.read(kisRealtimeServiceProvider),
     );
+    ref.onDispose(() {
+      _realtimeSubscription?.cancel();
+      _connectionSubscription?.cancel();
+      _visibleQuoteRefreshTimer?.cancel();
+    });
     return StocksScreenViewState(
       selectedMarket: 'domestic',
       selectedCategory: 'tradeAmount',
@@ -45,6 +55,99 @@ class StocksScreenViewModel extends Notifier<StocksScreenViewState> {
       liveDomesticPrices: const <String, RealtimeDomesticPrice>{},
       liveOverseasPrices: const <String, RealtimeOverseasPrice>{},
       liveQuoteStocks: const <String, RankingStock>{},
+    );
+  }
+
+  void attachRealtime(String ownerId) {
+    if (_subscriptionOwnerId == ownerId) {
+      return;
+    }
+
+    _subscriptionOwnerId = ownerId;
+    applyRealtimeSnapshot(_realtimeService.snapshot);
+    updateConnectionState(_realtimeService.connectionState);
+    _realtimeSubscription?.cancel();
+    _connectionSubscription?.cancel();
+    _visibleQuoteRefreshTimer?.cancel();
+
+    _realtimeSubscription = _realtimeService.stream.listen(
+      applyRealtimeSnapshot,
+    );
+    _connectionSubscription = _realtimeService.connectionStateStream.listen((
+      nextState,
+    ) {
+      final previousStatus = state.connectionState.status;
+      updateConnectionState(nextState);
+      if (nextState.status == KisRealtimeConnectionStatus.connected &&
+          previousStatus != KisRealtimeConnectionStatus.connected &&
+          _visibleStocks.isNotEmpty) {
+        unawaited(
+          handleVisibleStocksChanged(
+            ownerId: ownerId,
+            visibleStocks: _visibleStocks,
+            forceQuoteRefresh: true,
+            forceSubscriptionSync: true,
+          ),
+        );
+      }
+    });
+    _visibleQuoteRefreshTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      if (_visibleStocks.isEmpty || _subscriptionOwnerId != ownerId) {
+        return;
+      }
+      final connectionStatus = state.connectionState.status;
+      unawaited(
+        handleVisibleStocksChanged(
+          ownerId: ownerId,
+          visibleStocks: _visibleStocks,
+          forceQuoteRefresh: true,
+          forceSubscriptionSync:
+              connectionStatus != KisRealtimeConnectionStatus.connected,
+        ),
+      );
+    });
+  }
+
+  Future<void> detachRealtime() async {
+    final ownerId = _subscriptionOwnerId;
+    _subscriptionOwnerId = null;
+    _visibleStocks = const <RankingStock>[];
+    _realtimeSubscription?.cancel();
+    _realtimeSubscription = null;
+    _connectionSubscription?.cancel();
+    _connectionSubscription = null;
+    _visibleQuoteRefreshTimer?.cancel();
+    _visibleQuoteRefreshTimer = null;
+    if (ownerId != null) {
+      await clearRealtimeSubscription(ownerId);
+    }
+  }
+
+  Future<void> syncDisplayedStocks({
+    required String ownerId,
+    required List<RankingStock> visibleStocks,
+    bool forceQuoteRefresh = false,
+    bool forceSubscriptionSync = false,
+  }) {
+    _visibleStocks = visibleStocks;
+    return handleVisibleStocksChanged(
+      ownerId: ownerId,
+      visibleStocks: visibleStocks,
+      forceQuoteRefresh: forceQuoteRefresh,
+      forceSubscriptionSync: forceSubscriptionSync,
+    );
+  }
+
+  Future<void> handleAppResumed() async {
+    final ownerId = _subscriptionOwnerId;
+    if (ownerId == null || _visibleStocks.isEmpty) {
+      return;
+    }
+    await handleVisibleStocksChanged(
+      ownerId: ownerId,
+      visibleStocks: _visibleStocks,
+      forceQuoteRefresh: true,
+      forceSubscriptionSync: true,
     );
   }
 
@@ -93,6 +196,7 @@ class StocksScreenViewModel extends Notifier<StocksScreenViewState> {
       liveOverseasPrices: Map<String, RealtimeOverseasPrice>.from(
         snapshot.overseasStockPrices,
       ),
+      lastRefreshTime: DateTime.now(),
     );
   }
 
@@ -144,9 +248,11 @@ class StocksScreenViewModel extends Notifier<StocksScreenViewState> {
     required String ownerId,
     required List<RankingStock> visibleStocks,
     bool forceQuoteRefresh = false,
+    bool forceSubscriptionSync = false,
   }) async {
     final realtimeKeys = visibleStocks.map(stockKey).toSet();
-    if (!sameCodes(state.subscribedRealtimeKeys, realtimeKeys)) {
+    if (forceSubscriptionSync ||
+        !sameCodes(state.subscribedRealtimeKeys, realtimeKeys)) {
       state = state.copyWith(subscribedRealtimeKeys: realtimeKeys);
       await syncRealtimeSubscription(
         ownerId: ownerId,
@@ -181,6 +287,10 @@ class StocksScreenViewModel extends Notifier<StocksScreenViewState> {
   }
 
   Future<void> clearRealtimeSubscription(String ownerId) {
+    state = state.copyWith(
+      subscribedRealtimeKeys: const <String>{},
+      requestedLiveQuoteKeys: const <String>{},
+    );
     return _realtimeService.clearSubscription(ownerId);
   }
 

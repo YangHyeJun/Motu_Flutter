@@ -21,48 +21,21 @@ class _FavoritesScreenState extends ConsumerState<FavoritesScreen>
     with WidgetsBindingObserver {
   static const _subscriptionOwnerId = 'favorites_screen';
 
-  late final KisRealtimeService _realtimeService;
-  StreamSubscription<KisRealtimeSnapshot>? _realtimeSubscription;
-  StreamSubscription<KisRealtimeConnectionState>? _connectionSubscription;
+  String _visibleRealtimeSignature = '';
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _realtimeService = ref.read(kisRealtimeServiceProvider);
-    ref
-        .read(favoritesViewModelProvider.notifier)
-        .applyRealtimeSnapshot(_realtimeService.snapshot);
-    ref
-        .read(favoritesViewModelProvider.notifier)
-        .updateConnectionState(_realtimeService.connectionState);
-    _realtimeSubscription = _realtimeService.stream.listen((snapshot) {
-      ref
-          .read(favoritesViewModelProvider.notifier)
-          .applyRealtimeSnapshot(snapshot);
-    });
-    _connectionSubscription = _realtimeService.connectionStateStream.listen((
-      state,
-    ) {
-      ref
-          .read(favoritesViewModelProvider.notifier)
-          .updateConnectionState(state);
-    });
+    ref.read(favoritesViewModelProvider.notifier).attachRealtime(
+          _subscriptionOwnerId,
+        );
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _realtimeSubscription?.cancel();
-    _connectionSubscription?.cancel();
-    unawaited(
-      ref
-          .read(favoritesViewModelProvider.notifier)
-          .syncRealtimeSubscription(
-            ownerId: _subscriptionOwnerId,
-            visibleStocks: const <RankingStock>[],
-          ),
-    );
+    unawaited(ref.read(favoritesViewModelProvider.notifier).detachRealtime());
     super.dispose();
   }
 
@@ -81,12 +54,8 @@ class _FavoritesScreenState extends ConsumerState<FavoritesScreen>
         .map((favorite) => favorite.toRankingStock())
         .toList(growable: false);
     unawaited(
-      ref
-          .read(favoritesViewModelProvider.notifier)
-          .handleVisibleStocksChanged(
-            ownerId: _subscriptionOwnerId,
-            visibleStocks: visibleStocks,
-            forceQuoteRefresh: true,
+      ref.read(favoritesViewModelProvider.notifier).handleAppResumed(
+            visibleStocks,
           ),
     );
   }
@@ -116,6 +85,7 @@ class _FavoritesScreenState extends ConsumerState<FavoritesScreen>
     final hasOverseasTarget = liveFavoriteStocks.any(
       (stock) => stock.marketType == StockMarketType.overseas,
     );
+
     return SafeArea(
       child: RefreshIndicator(
         onRefresh: () => viewModel.refreshFavorites(favoriteStocks),
@@ -168,10 +138,11 @@ class _FavoritesScreenState extends ConsumerState<FavoritesScreen>
                     const SizedBox(height: 12),
                     _FavoritesRealtimeBanner(
                       connectionState: viewState.connectionState,
-                      onRetry: () => viewModel.handleVisibleStocksChanged(
+                      onRetry: () => viewModel.syncDisplayedStocks(
                         ownerId: _subscriptionOwnerId,
                         visibleStocks: liveFavoriteStocks,
                         forceQuoteRefresh: true,
+                        forceSubscriptionSync: true,
                       ),
                     ),
                   ],
@@ -209,18 +180,36 @@ class _FavoritesScreenState extends ConsumerState<FavoritesScreen>
   }
 
   void _scheduleRealtimeSubscription(List<RankingStock> stocks) {
+    final nextSignature = _stocksRealtimeSignature(stocks);
+    if (_visibleRealtimeSignature == nextSignature) {
+      return;
+    }
+    _visibleRealtimeSignature = nextSignature;
     final viewModel = ref.read(favoritesViewModelProvider.notifier);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
       }
       unawaited(
-        viewModel.handleVisibleStocksChanged(
+        viewModel.syncDisplayedStocks(
           ownerId: _subscriptionOwnerId,
           visibleStocks: stocks,
+          forceQuoteRefresh: true,
+          forceSubscriptionSync: true,
         ),
       );
     });
+  }
+
+  String _stocksRealtimeSignature(List<RankingStock> stocks) {
+    return stocks
+        .map((stock) {
+          if (stock.marketType == StockMarketType.domestic) {
+            return 'D:${stock.code}';
+          }
+          return 'O:${(stock.exchangeCode ?? 'NAS').toUpperCase()}:${stock.code.toUpperCase()}';
+        })
+        .join('|');
   }
 }
 
@@ -279,8 +268,15 @@ class _FavoriteStocksList extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.star_rounded, color: Color(0xFFF4B400)),
-                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 28,
+                      child: Text(
+                        '${stocks[index].rank}',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(color: AppColors.textSecondary),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -291,9 +287,7 @@ class _FavoriteStocksList extends StatelessWidget {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            stocks[index].marketLabel.isEmpty
-                                ? stocks[index].code
-                                : '${stocks[index].marketLabel} · ${stocks[index].code}',
+                            '${stocks[index].marketLabel} · ${stocks[index].code}',
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                         ],
@@ -303,7 +297,7 @@ class _FavoriteStocksList extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(
-                          _formatStockPrice(stocks[index]),
+                          _formatFavoritePrice(stocks[index]),
                           style: Theme.of(context).textTheme.titleMedium,
                         ),
                         const SizedBox(height: 2),
@@ -312,6 +306,11 @@ class _FavoriteStocksList extends StatelessWidget {
                               '${stocks[index].changeRate.abs().toStringAsFixed(2)}%',
                           isPositive: stocks[index].isPositive,
                           fontSize: 13,
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${stocks[index].extraLabel} ${stocks[index].extraValue}',
+                          style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
                     ),
@@ -347,26 +346,62 @@ class _FavoritesCurrencyToggle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final hasExchangeRate = exchangeRate != null && exchangeRate! > 0;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.darkSurfaceSoft : const Color(0xFFF7F7F8),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              !hasExchangeRate
-                  ? '해외 종목 원화 보기'
-                  : '해외 종목 원화 보기  •  1달러 ${exchangeRate!.toStringAsFixed(0)}원',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
+    final canShowKrw = exchangeRate != null && exchangeRate! > 0;
+    return Row(
+      children: [
+        _FavoritesChip(
+          label: '달러',
+          selected: !showKrw,
+          onTap: () => onChanged(false),
+        ),
+        const SizedBox(width: 8),
+        Opacity(
+          opacity: canShowKrw ? 1 : 0.5,
+          child: _FavoritesChip(
+            label: '원화',
+            selected: showKrw,
+            onTap: canShowKrw ? () => onChanged(true) : () {},
           ),
-          Switch.adaptive(value: showKrw, onChanged: onChanged),
-        ],
+        ),
+      ],
+    );
+  }
+}
+
+class _FavoritesChip extends StatelessWidget {
+  const _FavoritesChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return ChoiceChip(
+      label: Text(
+        label,
+        style: TextStyle(
+          color: selected
+              ? (isDark ? AppColors.darkTextPrimary : const Color(0xFF14563E))
+              : Theme.of(context).textTheme.bodyMedium?.color,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      selected: selected,
+      onSelected: (_) => onTap(),
+      backgroundColor: isDark
+          ? AppColors.darkSurfaceSoft
+          : Theme.of(context).cardColor,
+      selectedColor: isDark ? AppColors.darkAccentSoft : AppColors.accentSoft,
+      side: BorderSide(
+        color: selected
+            ? (isDark ? AppColors.darkAccent : AppColors.accent)
+            : (isDark ? AppColors.darkBorder : AppColors.border),
       ),
     );
   }
@@ -384,9 +419,10 @@ class _FavoritesRealtimeBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final isMarketClosed = (connectionState.errorMessage ?? '').contains(
-      '시간이 아닙니다.',
-    );
+    final errorMessage = connectionState.errorMessage ?? '';
+    final isMarketClosed =
+        errorMessage.contains('시간이 아닙니다.') ||
+        errorMessage.contains('실시간 체결 가능 시간이 아닙니다.');
     final message = switch (connectionState.status) {
       KisRealtimeConnectionStatus.connecting => '즐겨찾기 실시간 연결 중입니다.',
       KisRealtimeConnectionStatus.failed =>
@@ -419,23 +455,16 @@ class _FavoritesRealtimeBanner extends StatelessWidget {
               message,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: isDark
-                    ? const Color(0xFFFFE0A8)
-                    : const Color(0xFF8F5B0D),
+                    ? const Color(0xFFF6D6A0)
+                    : const Color(0xFF8B5A0A),
+                height: 1.4,
               ),
             ),
           ),
           if (!isMarketClosed)
             TextButton(
-              onPressed:
-                  connectionState.status ==
-                      KisRealtimeConnectionStatus.connecting
-                  ? null
-                  : onRetry,
-              child: Text(
-                connectionState.status == KisRealtimeConnectionStatus.connecting
-                    ? '연결 중'
-                    : '재연결',
-              ),
+              onPressed: onRetry,
+              child: const Text('재연결'),
             ),
         ],
       ),
@@ -443,41 +472,55 @@ class _FavoritesRealtimeBanner extends StatelessWidget {
   }
 }
 
-String _formatStockPrice(RankingStock stock) {
-  final currencySymbol = stock.currencySymbol;
-  final isWon = currencySymbol == '원';
-  if (isWon) {
-    return '${_formatAmount(stock.price)}원';
-  }
-
-  final scale = _pow10(stock.priceDecimals);
-  final amount = stock.price / scale;
-  return '$currencySymbol${amount.toStringAsFixed(2)}';
-}
-
 String _formatAmount(int value) {
-  final raw = value.abs().toString();
+  final digits = value.toString();
   final buffer = StringBuffer();
-  for (var index = 0; index < raw.length; index++) {
-    final reversedIndex = raw.length - index;
-    buffer.write(raw[index]);
-    if (reversedIndex > 1 && reversedIndex % 3 == 1) {
+  for (var i = 0; i < digits.length; i++) {
+    buffer.write(digits[i]);
+    final fromEnd = digits.length - i - 1;
+    if (fromEnd > 0 && fromEnd % 3 == 0) {
       buffer.write(',');
     }
   }
-  return value < 0 ? '-$buffer' : buffer.toString();
+  return buffer.toString();
 }
 
-int _pow10(int exponent) {
-  var value = 1;
-  for (var index = 0; index < exponent; index++) {
-    value *= 10;
-  }
-  return value;
+String _formatFavoritePrice(RankingStock stock) {
+  final decimals = stock.priceDecimals;
+  final scale = _pow10(decimals);
+  final absolute = stock.price.abs();
+  final whole = decimals == 0 ? absolute : absolute ~/ scale;
+  final rawFraction = decimals == 0
+      ? ''
+      : (absolute % scale).toString().padLeft(decimals, '0');
+  final fraction = stock.currencySymbol == r'$'
+      ? _trimTrailingZeros(rawFraction)
+      : rawFraction;
+  final numberText = _formatAmount(whole);
+  final amount = fraction.isEmpty ? numberText : '$numberText.$fraction';
+  final prefix = stock.currencySymbol == '원' ? '' : stock.currencySymbol;
+  final suffix = stock.currencySymbol == '원' ? stock.currencySymbol : '';
+  return '$prefix$amount$suffix';
 }
 
 String _formatFavoriteRefreshTime(DateTime value) {
   final hour = value.hour.toString().padLeft(2, '0');
   final minute = value.minute.toString().padLeft(2, '0');
-  return '$hour:$minute 기준';
+  return '$hour:$minute';
+}
+
+int _pow10(int exponent) {
+  var result = 1;
+  for (var i = 0; i < exponent; i++) {
+    result *= 10;
+  }
+  return result;
+}
+
+String _trimTrailingZeros(String value) {
+  var trimmed = value;
+  while (trimmed.endsWith('0')) {
+    trimmed = trimmed.substring(0, trimmed.length - 1);
+  }
+  return trimmed;
 }

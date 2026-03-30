@@ -144,30 +144,38 @@ class KisRealtimeSubscriptionRequest {
     this.domesticCodes = const <String>{},
     this.domesticOrderBookCodes = const <String>{},
     this.overseasTargets = const <OverseasRealtimeTarget>[],
+    this.overseasOrderBookTargets = const <OverseasRealtimeTarget>[],
     this.includeKospi = true,
   });
 
   final Set<String> domesticCodes;
   final Set<String> domesticOrderBookCodes;
   final List<OverseasRealtimeTarget> overseasTargets;
+  final List<OverseasRealtimeTarget> overseasOrderBookTargets;
   final bool includeKospi;
 
   bool get isEmpty =>
       !includeKospi &&
       domesticCodes.isEmpty &&
       domesticOrderBookCodes.isEmpty &&
-      overseasTargets.isEmpty;
+      overseasTargets.isEmpty &&
+      overseasOrderBookTargets.isEmpty;
 
   String get signature {
     final domestic = domesticCodes.toList()..sort();
     final orderBooks = domesticOrderBookCodes.toList()..sort();
     final overseas = overseasTargets.map((target) => target.key).toList()
       ..sort();
+    final overseasOrderBooks = overseasOrderBookTargets
+      .map((target) => target.key)
+      .toList()
+      ..sort();
     return [
       includeKospi ? '1' : '0',
       domestic.join(','),
       orderBooks.join(','),
       overseas.join(','),
+      overseasOrderBooks.join(','),
     ].join('|');
   }
 }
@@ -200,10 +208,13 @@ class KisRealtimeService {
   Set<String> _activeDomesticCodes = const <String>{};
   Set<String> _activeDomesticOrderBookCodes = const <String>{};
   Set<String> _activeOverseasTargets = const <String>{};
+  Set<String> _activeOverseasOrderBookTargets = const <String>{};
   String _activeDomesticTradeTrId = _domesticTradeTrId;
   Set<String> _requestedDomesticCodes = const <String>{};
   Set<String> _requestedDomesticOrderBookCodes = const <String>{};
   List<OverseasRealtimeTarget> _requestedOverseasRealtimeTargets =
+      const <OverseasRealtimeTarget>[];
+  List<OverseasRealtimeTarget> _requestedOverseasOrderBookTargets =
       const <OverseasRealtimeTarget>[];
   final Map<String, KisRealtimeSubscriptionRequest>
   _subscriptionRequestsByOwner = <String, KisRealtimeSubscriptionRequest>{};
@@ -245,6 +256,8 @@ class KisRealtimeService {
     Iterable<String> domesticOrderBookCodes = const <String>[],
     Iterable<OverseasRealtimeTarget> overseasTargets =
         const <OverseasRealtimeTarget>[],
+    Iterable<OverseasRealtimeTarget> overseasOrderBookTargets =
+        const <OverseasRealtimeTarget>[],
     bool includeKospi = true,
   }) async {
     await _enqueueOperation(() async {
@@ -253,6 +266,7 @@ class KisRealtimeService {
         domesticCodes: domesticCodes,
         domesticOrderBookCodes: domesticOrderBookCodes,
         overseasTargets: overseasTargets,
+        overseasOrderBookTargets: overseasOrderBookTargets,
         includeKospi: includeKospi,
       );
     });
@@ -263,6 +277,8 @@ class KisRealtimeService {
     Iterable<String> domesticCodes = const <String>[],
     Iterable<String> domesticOrderBookCodes = const <String>[],
     Iterable<OverseasRealtimeTarget> overseasTargets =
+        const <OverseasRealtimeTarget>[],
+    Iterable<OverseasRealtimeTarget> overseasOrderBookTargets =
         const <OverseasRealtimeTarget>[],
     bool includeKospi = true,
   }) async {
@@ -277,6 +293,13 @@ class KisRealtimeService {
           .toSet(),
       overseasTargets: [
         for (final target in overseasTargets)
+          OverseasRealtimeTarget(
+            code: target.code.trim().toUpperCase(),
+            exchangeCode: target.exchangeCode.trim().toUpperCase(),
+          ),
+      ],
+      overseasOrderBookTargets: [
+        for (final target in overseasOrderBookTargets)
           OverseasRealtimeTarget(
             code: target.code.trim().toUpperCase(),
             exchangeCode: target.exchangeCode.trim().toUpperCase(),
@@ -334,6 +357,8 @@ class KisRealtimeService {
     Iterable<String> domesticOrderBookCodes = const <String>[],
     Iterable<OverseasRealtimeTarget> overseasTargets =
         const <OverseasRealtimeTarget>[],
+    Iterable<OverseasRealtimeTarget> overseasOrderBookTargets =
+        const <OverseasRealtimeTarget>[],
     bool includeKospi = true,
     bool forceReconnect = false,
   }) async {
@@ -342,6 +367,7 @@ class KisRealtimeService {
         domesticCodes: domesticCodes,
         domesticOrderBookCodes: domesticOrderBookCodes,
         overseasTargets: overseasTargets,
+        overseasOrderBookTargets: overseasOrderBookTargets,
         includeKospi: includeKospi,
         forceReconnect: forceReconnect,
       );
@@ -352,6 +378,8 @@ class KisRealtimeService {
     Iterable<String> domesticCodes = const <String>[],
     Iterable<String> domesticOrderBookCodes = const <String>[],
     Iterable<OverseasRealtimeTarget> overseasTargets =
+        const <OverseasRealtimeTarget>[],
+    Iterable<OverseasRealtimeTarget> overseasOrderBookTargets =
         const <OverseasRealtimeTarget>[],
     bool includeKospi = true,
     bool forceReconnect = false,
@@ -373,10 +401,20 @@ class KisRealtimeService {
     final nextOverseasTargets = overseasTargets
         .map((target) => _overseasKey(target.exchangeCode, target.code))
         .toSet();
+    final nextOverseasOrderBookTargets = overseasOrderBookTargets
+        .map((target) => _overseasKey(target.exchangeCode, target.code))
+        .toSet();
     _requestedDomesticCodes = nextDomesticCodes;
     _requestedDomesticOrderBookCodes = nextDomesticOrderBookCodes;
     _requestedOverseasRealtimeTargets = [
       for (final target in overseasTargets)
+        OverseasRealtimeTarget(
+          code: target.code.trim().toUpperCase(),
+          exchangeCode: target.exchangeCode.trim().toUpperCase(),
+        ),
+    ];
+    _requestedOverseasOrderBookTargets = [
+      for (final target in overseasOrderBookTargets)
         OverseasRealtimeTarget(
           code: target.code.trim().toUpperCase(),
           exchangeCode: target.exchangeCode.trim().toUpperCase(),
@@ -387,7 +425,8 @@ class KisRealtimeService {
         includeKospi ||
         nextDomesticCodes.isNotEmpty ||
         nextDomesticOrderBookCodes.isNotEmpty;
-    final requestedOverseasSubscription = nextOverseasTargets.isNotEmpty;
+    final requestedOverseasSubscription =
+        nextOverseasTargets.isNotEmpty || nextOverseasOrderBookTargets.isNotEmpty;
     final domesticSession = _currentDomesticSession();
     final domesticOpen = domesticSession != _DomesticRealtimeSession.closed;
     final overseasSession = _currentOverseasRealtimeSession();
@@ -407,6 +446,9 @@ class KisRealtimeService {
         : const <String>{};
     final subscribedOverseasTargets = shouldSubscribeOverseas
         ? nextOverseasTargets
+        : const <String>{};
+    final subscribedOverseasOrderBookTargets = shouldSubscribeOverseas
+        ? nextOverseasOrderBookTargets
         : const <String>{};
     final hasAnySubscription =
         requestedDomesticSubscription || requestedOverseasSubscription;
@@ -449,6 +491,7 @@ class KisRealtimeService {
           domesticCodes: subscribedDomesticCodes,
           domesticOrderBookCodes: subscribedDomesticOrderBookCodes,
           overseasTargets: subscribedOverseasTargets,
+          overseasOrderBookTargets: subscribedOverseasOrderBookTargets,
         );
         _updateConnectionState(
           _connectionState.copyWith(
@@ -494,9 +537,10 @@ class KisRealtimeService {
       final lifecycleToken = _socketLifecycleToken;
       _socket = socket;
       _activeDomesticCodes = const <String>{};
-      _activeDomesticOrderBookCodes = const <String>{};
-      _activeOverseasTargets = const <String>{};
-      _includeKospi = false;
+    _activeDomesticOrderBookCodes = const <String>{};
+    _activeOverseasTargets = const <String>{};
+    _activeOverseasOrderBookTargets = const <String>{};
+    _includeKospi = false;
 
       _socketSubscription = socket.listen(
         _handleMessage,
@@ -540,6 +584,7 @@ class KisRealtimeService {
         domesticCodes: subscribedDomesticCodes,
         domesticOrderBookCodes: subscribedDomesticOrderBookCodes,
         overseasTargets: subscribedOverseasTargets,
+        overseasOrderBookTargets: subscribedOverseasOrderBookTargets,
       );
       _updateConnectionState(
         _connectionState.copyWith(
@@ -577,6 +622,7 @@ class KisRealtimeService {
     final domesticCodes = <String>{};
     final domesticOrderBookCodes = <String>{};
     final overseasTargets = <String, OverseasRealtimeTarget>{};
+    final overseasOrderBookTargets = <String, OverseasRealtimeTarget>{};
     var includeKospi = false;
 
     for (final request in _subscriptionRequestsByOwner.values) {
@@ -587,11 +633,16 @@ class KisRealtimeService {
         overseasTargets[_overseasKey(target.exchangeCode, target.code)] =
             target;
       }
+      for (final target in request.overseasOrderBookTargets) {
+        overseasOrderBookTargets[_overseasKey(target.exchangeCode, target.code)] =
+            target;
+      }
     }
 
     if (domesticCodes.isEmpty &&
         domesticOrderBookCodes.isEmpty &&
         overseasTargets.isEmpty &&
+        overseasOrderBookTargets.isEmpty &&
         !includeKospi) {
       _lastMergedRequestSignature = null;
       await _disconnectFullyInternal(clearSnapshot: clearSnapshotWhenEmpty);
@@ -602,6 +653,9 @@ class KisRealtimeService {
       domesticCodes: domesticCodes,
       domesticOrderBookCodes: domesticOrderBookCodes,
       overseasTargets: overseasTargets.values.toList(growable: false),
+      overseasOrderBookTargets: overseasOrderBookTargets.values.toList(
+        growable: false,
+      ),
       includeKospi: includeKospi,
     );
     final mergedSignature = mergedRequest.signature;
@@ -620,6 +674,7 @@ class KisRealtimeService {
       domesticCodes: domesticCodes,
       domesticOrderBookCodes: domesticOrderBookCodes,
       overseasTargets: overseasTargets.values,
+      overseasOrderBookTargets: overseasOrderBookTargets.values,
       includeKospi: includeKospi,
       forceReconnect: forceReconnect,
     );
@@ -658,12 +713,14 @@ class KisRealtimeService {
     _activeDomesticCodes = const <String>{};
     _activeDomesticOrderBookCodes = const <String>{};
     _activeOverseasTargets = const <String>{};
+    _activeOverseasOrderBookTargets = const <String>{};
     _activeDomesticTradeTrId = _domesticTradeTrId;
     _includeKospi = false;
     if (!preserveRequested) {
       _requestedDomesticCodes = const <String>{};
       _requestedDomesticOrderBookCodes = const <String>{};
       _requestedOverseasRealtimeTargets = const <OverseasRealtimeTarget>[];
+      _requestedOverseasOrderBookTargets = const <OverseasRealtimeTarget>[];
       _requestedIncludeKospi = false;
     }
 
@@ -704,7 +761,9 @@ class KisRealtimeService {
         _requestedIncludeKospi ||
         _requestedDomesticCodes.isNotEmpty ||
         _requestedDomesticOrderBookCodes.isNotEmpty;
-    final overseasRequested = _requestedOverseasRealtimeTargets.isNotEmpty;
+    final overseasRequested =
+        _requestedOverseasRealtimeTargets.isNotEmpty ||
+        _requestedOverseasOrderBookTargets.isNotEmpty;
     if (!domesticRequested && !overseasRequested) {
       return;
     }
@@ -972,6 +1031,7 @@ class KisRealtimeService {
     required Set<String> domesticCodes,
     required Set<String> domesticOrderBookCodes,
     required Set<String> overseasTargets,
+    required Set<String> overseasOrderBookTargets,
   }) {
     if (_includeKospi && !includeKospi) {
       _sendSubscription(
@@ -1025,8 +1085,8 @@ class KisRealtimeService {
     _syncCodeSubscriptions(
       approvalKey: approvalKey,
       trId: _overseasOrderBookTrId,
-      currentCodes: _activeOverseasTargets,
-      nextCodes: overseasTargets,
+      currentCodes: _activeOverseasOrderBookTargets,
+      nextCodes: overseasOrderBookTargets,
       transformTrKey: _buildOverseasRealtimeKeyFromKey,
     );
 
@@ -1035,6 +1095,7 @@ class KisRealtimeService {
     _activeDomesticCodes = domesticCodes;
     _activeDomesticOrderBookCodes = domesticOrderBookCodes;
     _activeOverseasTargets = overseasTargets;
+    _activeOverseasOrderBookTargets = overseasOrderBookTargets;
   }
 
   void _syncCodeSubscriptions({

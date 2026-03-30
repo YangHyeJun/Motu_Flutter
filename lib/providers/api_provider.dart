@@ -17,6 +17,7 @@ import '../repositories/stocks_market_repository.dart';
 import '../viewmodels/detail_action_view_model.dart';
 import '../viewmodels/favorites_view_model.dart';
 import '../viewmodels/favorites_view_state.dart';
+import '../viewmodels/more_view_model.dart';
 import '../viewmodels/stocks_screen_view_model.dart';
 import '../viewmodels/stocks_screen_view_state.dart';
 
@@ -314,6 +315,10 @@ final favoritesViewModelProvider =
     NotifierProvider<FavoritesViewModel, FavoritesViewState>(
       FavoritesViewModel.new,
     );
+
+final moreViewModelProvider = Provider<MoreViewModel>((ref) {
+  return const MoreViewModel();
+});
 
 final stockSearchRepositoryProvider = Provider<StockSearchRepository>((ref) {
   return StockSearchRepository();

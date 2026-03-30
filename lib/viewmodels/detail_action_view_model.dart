@@ -55,6 +55,14 @@ class DetailActionViewModel {
       overseasTargets: [
         OverseasRealtimeTarget(code: code, exchangeCode: exchangeCode ?? 'NAS'),
       ],
+      overseasOrderBookTargets: includeOrderBook
+          ? [
+              OverseasRealtimeTarget(
+                code: code,
+                exchangeCode: exchangeCode ?? 'NAS',
+              ),
+            ]
+          : const <OverseasRealtimeTarget>[],
       includeKospi: false,
     );
   }

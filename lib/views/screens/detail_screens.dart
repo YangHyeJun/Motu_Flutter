@@ -961,6 +961,7 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen>
                                   currentPrice: basePrice,
                                   exchangeRate: exchangeRate,
                                 ),
+                                viewModel: ref.read(moreViewModelProvider),
                               ),
                             ),
                           ),
