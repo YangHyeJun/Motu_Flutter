@@ -35,20 +35,74 @@ class MarketIndexDetailRepository {
       },
     );
 
-    final quote = quoteResponse['output'] as Map<String, dynamic>? ?? <String, dynamic>{};
-    final chartEntries = await _fetchDomesticChartEntries(target: target, period: period);
+    final quote =
+        quoteResponse['output'] as Map<String, dynamic>? ?? <String, dynamic>{};
+    final chartDetail = await _fetchDomesticChartDetail(
+      target: target,
+      period: period,
+    );
+    final chartSummary = chartDetail.summary;
+    final chartEntries = chartDetail.entries;
+    final currentValue = _firstNonZeroDouble([
+      quote['bstp_nmix_prpr'],
+      chartSummary?['bstp_nmix_prpr'],
+      chartEntries.isNotEmpty ? chartEntries.last.closePrice : 0,
+    ]);
+    final changeAmount = _firstNonZeroDouble([
+      quote['bstp_nmix_prdy_vrss'],
+      chartSummary?['bstp_nmix_prdy_vrss'],
+      chartEntries.length >= 2
+          ? chartEntries.last.closePrice -
+                chartEntries[chartEntries.length - 2].closePrice
+          : 0,
+    ]);
+    final changeRate = _firstNonZeroDouble([
+      quote['bstp_nmix_prdy_ctrt'],
+      chartSummary?['bstp_nmix_prdy_ctrt'],
+      chartEntries.length >= 2 &&
+              chartEntries[chartEntries.length - 2].closePrice > 0
+          ? ((chartEntries.last.closePrice -
+                        chartEntries[chartEntries.length - 2].closePrice) /
+                    chartEntries[chartEntries.length - 2].closePrice) *
+                100
+          : 0,
+    ]);
+    final openValue = _firstNonZeroDouble([
+      quote['bstp_nmix_oprc'],
+      chartSummary?['bstp_nmix_oprc'],
+      chartEntries.isNotEmpty ? chartEntries.last.openPrice : 0,
+    ]);
+    final highValue = _firstNonZeroDouble([
+      quote['bstp_nmix_hgpr'],
+      chartSummary?['bstp_nmix_hgpr'],
+      chartEntries.isNotEmpty ? _chartHigh(chartEntries) : 0,
+    ]);
+    final lowValue = _firstNonZeroDouble([
+      quote['bstp_nmix_lwpr'],
+      chartSummary?['bstp_nmix_lwpr'],
+      chartEntries.isNotEmpty ? _chartLow(chartEntries) : 0,
+    ]);
+    final volume = _firstNonZeroInt([
+      quote['acml_vol'],
+      chartSummary?['acml_vol'],
+      chartEntries.isNotEmpty ? chartEntries.last.volume : 0,
+    ]);
 
     return MarketIndexDetail(
       name: target.name,
       code: target.code,
-      currentValue: _formatNumberString(quote['bstp_nmix_prpr']),
-      changeAmount: _formatSignedNumberString(quote['bstp_nmix_prdy_vrss']),
-      changeRate: _toDouble(quote['bstp_nmix_prdy_ctrt']),
-      isPositive: _isPositive(quote['prdy_vrss_sign'] as String?, _toDouble(quote['bstp_nmix_prdy_ctrt'])),
-      openValue: _formatNumberString(quote['bstp_nmix_oprc']),
-      highValue: _formatNumberString(quote['bstp_nmix_hgpr']),
-      lowValue: _formatNumberString(quote['bstp_nmix_lwpr']),
-      volume: _toInt(quote['acml_vol']),
+      currentValue: _formatNumberString(currentValue),
+      changeAmount: _formatSignedNumberString(changeAmount),
+      changeRate: changeRate,
+      isPositive: _isPositive(
+        quote['prdy_vrss_sign'] as String? ??
+            chartSummary?['prdy_vrss_sign'] as String?,
+        changeRate,
+      ),
+      openValue: _formatNumberString(openValue),
+      highValue: _formatNumberString(highValue),
+      lowValue: _formatNumberString(lowValue),
+      volume: volume,
       chartEntries: chartEntries,
     );
   }
@@ -57,32 +111,92 @@ class MarketIndexDetailRepository {
     required _MarketIndexTarget target,
     required StockChartPeriod period,
   }) async {
-    final quoteResponse = await _fetchOverseasDailyResponse(
-      symbol: target.symbolCandidates.first,
-      from: DateTime.now().subtract(const Duration(days: 7)),
-      to: DateTime.now(),
-      periodCode: 'D',
+    final chartEntries = await _fetchOverseasChartEntries(
+      target: target,
+      period: period,
     );
-
-    final quote = quoteResponse['output1'] as Map<String, dynamic>? ?? <String, dynamic>{};
-    final chartEntries = await _fetchOverseasChartEntries(target: target, period: period);
+    final quote = await _fetchOverseasQuote(target);
+    final latestChart = chartEntries.isEmpty ? null : chartEntries.last;
+    final currentValue = _firstNonZeroDouble([
+      quote['ovrs_nmix_prpr'],
+      quote['optn_prpr'],
+      latestChart?.closePrice,
+    ]);
+    final openValue = _firstNonZeroDouble([
+      quote['ovrs_prod_oprc'],
+      latestChart?.openPrice,
+    ]);
+    final highValue = _firstNonZeroDouble([
+      quote['ovrs_prod_hgpr'],
+      latestChart?.highPrice,
+    ]);
+    final lowValue = _firstNonZeroDouble([
+      quote['ovrs_prod_lwpr'],
+      latestChart?.lowPrice,
+    ]);
+    final changeRate =
+        _toDouble(quote['prdy_ctrt']) == 0 && chartEntries.length >= 2
+        ? ((chartEntries.last.closePrice -
+                      chartEntries[chartEntries.length - 2].closePrice) /
+                  chartEntries[chartEntries.length - 2].closePrice) *
+              100
+        : _toDouble(quote['prdy_ctrt']);
+    final changeAmount = _firstNonZeroDouble([
+      quote['ovrs_nmix_prdy_vrss'],
+      chartEntries.length >= 2
+          ? chartEntries.last.closePrice -
+                chartEntries[chartEntries.length - 2].closePrice
+          : 0,
+    ]);
 
     return MarketIndexDetail(
       name: target.name,
-      code: target.symbolCandidates.first,
-      currentValue: _formatNumberString(quote['ovrs_nmix_prpr']),
-      changeAmount: _formatSignedNumberString(quote['ovrs_nmix_prdy_vrss']),
-      changeRate: _toDouble(quote['prdy_ctrt']),
-      isPositive: _isPositive(quote['prdy_vrss_sign'] as String?, _toDouble(quote['prdy_ctrt'])),
-      openValue: _formatNumberString(quote['ovrs_prod_oprc']),
-      highValue: _formatNumberString(quote['ovrs_prod_hgpr']),
-      lowValue: _formatNumberString(quote['ovrs_prod_lwpr']),
+      code: quote['symbol'] as String? ?? target.symbolCandidates.first,
+      currentValue: _formatNumberString(currentValue),
+      changeAmount: _formatSignedNumberString(changeAmount),
+      changeRate: changeRate,
+      isPositive: _isPositive(quote['prdy_vrss_sign'] as String?, changeRate),
+      openValue: _formatNumberString(openValue),
+      highValue: _formatNumberString(highValue),
+      lowValue: _formatNumberString(lowValue),
       volume: _toInt(quote['acml_vol']),
       chartEntries: chartEntries,
     );
   }
 
-  Future<List<StockChartEntry>> _fetchDomesticChartEntries({
+  Future<Map<String, dynamic>> _fetchOverseasQuote(
+    _MarketIndexTarget target,
+  ) async {
+    final now = DateTime.now();
+    final from = now.subtract(const Duration(days: 7));
+
+    for (final symbol in target.symbolCandidates) {
+      try {
+        final response = await _fetchOverseasDailyResponse(
+          symbol: symbol,
+          from: from,
+          to: now,
+          periodCode: 'D',
+        );
+        final quote =
+            response['output1'] as Map<String, dynamic>? ?? <String, dynamic>{};
+        final currentValue = _firstNonZeroDouble([
+          quote['ovrs_nmix_prpr'],
+          quote['optn_prpr'],
+        ]);
+        if (currentValue > 0) {
+          return {...quote, 'symbol': symbol};
+        }
+      } on KisApiException {
+        continue;
+      }
+    }
+
+    return <String, dynamic>{'symbol': target.symbolCandidates.first};
+  }
+
+  Future<({Map<String, dynamic>? summary, List<StockChartEntry> entries})>
+  _fetchDomesticChartDetail({
     required _MarketIndexTarget target,
     required StockChartPeriod period,
   }) async {
@@ -92,26 +206,41 @@ class MarketIndexDetailRepository {
         trId: 'FHKUP03500200',
         queryParameters: {
           'FID_COND_MRKT_DIV_CODE': 'U',
+          'FID_ETC_CLS_CODE': '0',
           'FID_INPUT_ISCD': target.code,
           'FID_INPUT_HOUR_1': '60',
+          'FID_PW_DATA_INCU_YN': 'Y',
         },
       );
 
-      return _mapChartEntries(
-        response['output'] as List<dynamic>? ?? const <dynamic>[],
+      final entries = _mapChartEntries(
+        response['output2'] as List<dynamic>? ?? const <dynamic>[],
         dateKey: 'stck_bsop_date',
-        timeKey: 'bsop_hour',
+        timeKey: 'stck_cntg_hour',
         closeKeys: const ['bstp_nmix_prpr'],
+        openKeys: const ['bstp_nmix_oprc'],
+        highKeys: const ['bstp_nmix_hgpr'],
+        lowKeys: const ['bstp_nmix_lwpr'],
         volumeKeys: const ['cntg_vol', 'acml_vol'],
         intraday: true,
+      );
+      return (
+        summary: response['output1'] as Map<String, dynamic>?,
+        entries: entries,
       );
     }
 
     final now = DateTime.now();
     final (periodCode, startDate) = switch (period) {
       StockChartPeriod.oneWeek => ('D', now.subtract(const Duration(days: 7))),
-      StockChartPeriod.oneMonth => ('D', now.subtract(const Duration(days: 30))),
-      StockChartPeriod.oneYear => ('W', now.subtract(const Duration(days: 365))),
+      StockChartPeriod.oneMonth => (
+        'D',
+        now.subtract(const Duration(days: 30)),
+      ),
+      StockChartPeriod.oneYear => (
+        'W',
+        now.subtract(const Duration(days: 365)),
+      ),
       StockChartPeriod.all => ('M', now.subtract(const Duration(days: 3650))),
       StockChartPeriod.oneDay => ('D', now.subtract(const Duration(days: 1))),
     };
@@ -128,13 +257,19 @@ class MarketIndexDetailRepository {
       },
     );
 
-    return _mapChartEntries(
-      response['output2'] as List<dynamic>? ?? const <dynamic>[],
-      dateKey: 'stck_bsop_date',
-      timeKey: 'stck_bsop_date',
-      closeKeys: const ['bstp_nmix_prpr'],
-      volumeKeys: const ['acml_vol'],
-      intraday: false,
+    return (
+      summary: response['output1'] as Map<String, dynamic>?,
+      entries: _mapChartEntries(
+        response['output2'] as List<dynamic>? ?? const <dynamic>[],
+        dateKey: 'stck_bsop_date',
+        timeKey: 'stck_bsop_date',
+        closeKeys: const ['bstp_nmix_prpr'],
+        openKeys: const ['bstp_nmix_oprc'],
+        highKeys: const ['bstp_nmix_hgpr'],
+        lowKeys: const ['bstp_nmix_lwpr'],
+        volumeKeys: const ['acml_vol'],
+        intraday: false,
+      ),
     );
   }
 
@@ -146,7 +281,8 @@ class MarketIndexDetailRepository {
       for (final symbol in target.symbolCandidates) {
         try {
           final response = await _apiClient.get(
-            path: '/uapi/overseas-price/v1/quotations/inquire-time-indexchartprice',
+            path:
+                '/uapi/overseas-price/v1/quotations/inquire-time-indexchartprice',
             trId: 'FHKST03030200',
             queryParameters: {
               'FID_COND_MRKT_DIV_CODE': 'N',
@@ -161,6 +297,24 @@ class MarketIndexDetailRepository {
             dateKey: 'stck_bsop_date',
             timeKey: 'stck_cntg_hour',
             closeKeys: const ['optn_prpr', 'ovrs_nmix_prpr'],
+            openKeys: const [
+              'optn_oprc',
+              'ovrs_nmix_oprc',
+              'optn_prpr',
+              'ovrs_nmix_prpr',
+            ],
+            highKeys: const [
+              'optn_hgpr',
+              'ovrs_nmix_hgpr',
+              'optn_prpr',
+              'ovrs_nmix_prpr',
+            ],
+            lowKeys: const [
+              'optn_lwpr',
+              'ovrs_nmix_lwpr',
+              'optn_prpr',
+              'ovrs_nmix_prpr',
+            ],
             volumeKeys: const ['cntg_vol', 'acml_vol'],
             intraday: true,
           );
@@ -176,8 +330,14 @@ class MarketIndexDetailRepository {
     final now = DateTime.now();
     final (periodCode, startDate) = switch (period) {
       StockChartPeriod.oneWeek => ('D', now.subtract(const Duration(days: 7))),
-      StockChartPeriod.oneMonth => ('D', now.subtract(const Duration(days: 30))),
-      StockChartPeriod.oneYear => ('W', now.subtract(const Duration(days: 365))),
+      StockChartPeriod.oneMonth => (
+        'D',
+        now.subtract(const Duration(days: 30)),
+      ),
+      StockChartPeriod.oneYear => (
+        'W',
+        now.subtract(const Duration(days: 365)),
+      ),
       StockChartPeriod.all => ('M', now.subtract(const Duration(days: 3650))),
       StockChartPeriod.oneDay => ('D', now.subtract(const Duration(days: 30))),
     };
@@ -196,6 +356,9 @@ class MarketIndexDetailRepository {
           dateKey: 'xymd',
           timeKey: 'xymd',
           closeKeys: const ['clos', 'ovrs_nmix_prpr'],
+          openKeys: const ['open', 'clos', 'ovrs_nmix_prpr'],
+          highKeys: const ['high', 'clos', 'ovrs_nmix_prpr'],
+          lowKeys: const ['low', 'clos', 'ovrs_nmix_prpr'],
           volumeKeys: const ['tvol', 'acml_vol'],
           intraday: false,
         );
@@ -234,6 +397,9 @@ class MarketIndexDetailRepository {
     required String dateKey,
     required String timeKey,
     required List<String> closeKeys,
+    required List<String> openKeys,
+    required List<String> highKeys,
+    required List<String> lowKeys,
     required List<String> volumeKeys,
     required bool intraday,
   }) {
@@ -245,6 +411,15 @@ class MarketIndexDetailRepository {
           final close = closeKeys
               .map((key) => _toDouble(item[key]))
               .firstWhere((value) => value != 0, orElse: () => 0);
+          final open = openKeys
+              .map((key) => _toDouble(item[key]))
+              .firstWhere((value) => value != 0, orElse: () => close);
+          final high = highKeys
+              .map((key) => _toDouble(item[key]))
+              .firstWhere((value) => value != 0, orElse: () => close);
+          final low = lowKeys
+              .map((key) => _toDouble(item[key]))
+              .firstWhere((value) => value != 0, orElse: () => close);
           final volume = volumeKeys
               .map((key) => _toInt(item[key]))
               .firstWhere((value) => value != 0, orElse: () => 0);
@@ -253,10 +428,12 @@ class MarketIndexDetailRepository {
 
           return StockChartEntry(
             date: rawDate,
-            timeLabel: intraday ? _formatTimeLabel(rawTime) : _formatDateLabel(rawTime),
-            openPrice: close.round(),
-            highPrice: close.round(),
-            lowPrice: close.round(),
+            timeLabel: intraday
+                ? _formatTimeLabel(rawTime)
+                : _formatDateLabel(rawTime),
+            openPrice: open.round(),
+            highPrice: high.round(),
+            lowPrice: low.round(),
             closePrice: close.round(),
             volume: volume,
           );
@@ -283,8 +460,53 @@ class MarketIndexDetailRepository {
     return _toDouble(value).round();
   }
 
+  int _firstNonZeroInt(List<dynamic> values) {
+    for (final value in values) {
+      final parsed = _toInt(value);
+      if (parsed != 0) {
+        return parsed;
+      }
+    }
+    return 0;
+  }
+
   double _toDouble(dynamic value) {
     return double.tryParse('${value ?? ''}'.replaceAll(',', '').trim()) ?? 0.0;
+  }
+
+  double _firstNonZeroDouble(List<dynamic> values) {
+    for (final value in values) {
+      final parsed = _toDouble(value);
+      if (parsed != 0) {
+        return parsed;
+      }
+    }
+    return 0.0;
+  }
+
+  double _chartHigh(List<StockChartEntry> entries) {
+    var value = 0.0;
+    for (final entry in entries) {
+      if (entry.highPrice > value) {
+        value = entry.highPrice.toDouble();
+      }
+    }
+    return value;
+  }
+
+  double _chartLow(List<StockChartEntry> entries) {
+    double? value;
+    for (final entry in entries) {
+      if (entry.lowPrice <= 0) {
+        continue;
+      }
+      value = value == null
+          ? entry.lowPrice.toDouble()
+          : entry.lowPrice < value
+          ? entry.lowPrice.toDouble()
+          : value;
+    }
+    return value ?? 0.0;
   }
 
   String _formatDate(DateTime value) {
@@ -354,11 +576,9 @@ class MarketIndexDetailRepository {
 }
 
 class _MarketIndexTarget {
-  const _MarketIndexTarget.domestic({
-    required this.name,
-    required this.code,
-  }) : isDomestic = true,
-       symbolCandidates = const [];
+  const _MarketIndexTarget.domestic({required this.name, required this.code})
+    : isDomestic = true,
+      symbolCandidates = const [];
 
   const _MarketIndexTarget.overseas({
     required this.name,
@@ -375,5 +595,8 @@ class _MarketIndexTarget {
 const Map<String, _MarketIndexTarget> _targets = {
   '코스피': _MarketIndexTarget.domestic(name: '코스피', code: '0001'),
   '코스닥': _MarketIndexTarget.domestic(name: '코스닥', code: '1001'),
-  '나스닥': _MarketIndexTarget.overseas(name: '나스닥', symbolCandidates: ['.IXIC', 'IXIC', 'COMP']),
+  '나스닥': _MarketIndexTarget.overseas(
+    name: '나스닥',
+    symbolCandidates: ['.IXIC', 'IXIC', 'COMP'],
+  ),
 };

@@ -10,17 +10,45 @@ import '../providers/api_provider.dart';
 import 'home_view_state.dart';
 
 class HomeViewModel extends Notifier<HomeViewState> {
+  static const _subscriptionOwnerId = 'home_view_model';
   StreamSubscription<KisRealtimeSnapshot>? _realtimeSubscription;
+  Timer? _marketRefreshTimer;
+  static const _marketRefreshInterval = Duration(seconds: 2);
+  bool _didScheduleInitialLoad = false;
+  bool _isDisposed = false;
+  int _deferredRefreshToken = 0;
 
   @override
   HomeViewState build() {
     ref.watch(selectedAccountProvider);
-    _ensureRealtimeListener();
+    _isDisposed = false;
+    final realtimeService = ref.read(kisRealtimeServiceProvider);
     ref.onDispose(() {
+      _isDisposed = true;
+      _deferredRefreshToken++;
       _realtimeSubscription?.cancel();
+      _marketRefreshTimer?.cancel();
+      unawaited(realtimeService.clearSubscription(_subscriptionOwnerId));
     });
     final initialState = _buildInitialState();
-    Future<void>.microtask(_loadFromServer);
+    if (!_didScheduleInitialLoad) {
+      _didScheduleInitialLoad = true;
+      Future<void>.microtask(() async {
+        if (_isDisposed) {
+          return;
+        }
+        _ensureRealtimeListener();
+        _ensureMarketRefreshTimer();
+        await _loadFromServer();
+      });
+    } else {
+      Future<void>.microtask(() async {
+        if (_isDisposed) {
+          return;
+        }
+        await _syncRealtimeSubscriptionSafely();
+      });
+    }
     return initialState;
   }
 
@@ -45,6 +73,12 @@ class HomeViewModel extends Notifier<HomeViewState> {
         return _refreshDomesticHoldingsSection();
       case HomeSection.usHoldings:
         return _refreshUsHoldingsSection();
+      case HomeSection.news:
+        return _refreshNewsSection();
+      case HomeSection.investorFlow:
+        return _refreshInvestorFlowSection();
+      case HomeSection.momentum:
+        return _refreshMomentumSection();
       case HomeSection.shortSell:
         return _refreshShortSellSection();
     }
@@ -61,6 +95,12 @@ class HomeViewModel extends Notifier<HomeViewState> {
       marketIndexes: const [],
       domesticHoldings: const [],
       usHoldings: const [],
+      newsItems: const [],
+      investorFlows: const [],
+      domesticTopMovers: const [],
+      domesticVolumeLeaders: const [],
+      overseasTopMovers: const [],
+      overseasVolumeLeaders: const [],
       shortSellRankings: const [],
       lastUpdated: DateTime.now(),
       isSyncing: false,
@@ -80,6 +120,7 @@ class HomeViewModel extends Notifier<HomeViewState> {
   Future<void> _loadFromServer() async {
     final apiClient = ref.read(kisApiClientProvider);
     final repository = ref.read(homeRepositoryProvider);
+    final refreshToken = ++_deferredRefreshToken;
     if (await _ensureConfigAndToken(apiClient) == false) {
       await _syncRealtimeSubscriptionSafely();
       return;
@@ -117,6 +158,7 @@ class HomeViewModel extends Notifier<HomeViewState> {
         },
       );
       await _syncRealtimeSubscriptionSafely();
+      unawaited(_refreshDeferredSections(refreshToken));
     } on KisApiException catch (error) {
       state = state.copyWith(
         isSyncing: false,
@@ -135,6 +177,26 @@ class HomeViewModel extends Notifier<HomeViewState> {
         lastUpdated: DateTime.now(),
       );
       await _syncRealtimeSubscriptionSafely();
+    }
+  }
+
+  Future<void> _refreshDeferredSections(int refreshToken) async {
+    const sections = <HomeSection>[
+      HomeSection.news,
+      HomeSection.investorFlow,
+      HomeSection.momentum,
+      HomeSection.shortSell,
+    ];
+
+    for (final section in sections) {
+      if (_isDisposed || refreshToken != _deferredRefreshToken) {
+        return;
+      }
+      await refreshSection(section);
+      if (_isDisposed || refreshToken != _deferredRefreshToken) {
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 250));
     }
   }
 
@@ -173,7 +235,9 @@ class HomeViewModel extends Notifier<HomeViewState> {
     final repository = ref.read(homeRepositoryProvider);
     _setSectionSyncing(HomeSection.market, true);
     try {
-      final marketIndexes = await repository.fetchMarketIndexes(state.marketIndexes);
+      final marketIndexes = await repository.fetchMarketIndexes(
+        state.marketIndexes,
+      );
       final updatedAt = DateTime.now();
       state = state.copyWith(
         marketIndexes: marketIndexes,
@@ -238,6 +302,7 @@ class HomeViewModel extends Notifier<HomeViewState> {
           clearErrorMessage: true,
         ),
       );
+      await _syncRealtimeSubscriptionSafely();
     } on KisApiException catch (error) {
       _setSectionError(HomeSection.usHoldings, error.message);
     } catch (_) {
@@ -253,7 +318,9 @@ class HomeViewModel extends Notifier<HomeViewState> {
     final repository = ref.read(homeRepositoryProvider);
     _setSectionSyncing(HomeSection.shortSell, true);
     try {
-      final rankings = await repository.fetchShortSellRankings(state.shortSellRankings);
+      final rankings = await repository.fetchShortSellRankings(
+        state.shortSellRankings,
+      );
       final updatedAt = DateTime.now();
       state = state.copyWith(
         shortSellRankings: rankings,
@@ -270,6 +337,91 @@ class HomeViewModel extends Notifier<HomeViewState> {
     }
   }
 
+  Future<void> _refreshNewsSection() async {
+    if (await _ensureConfigAndToken(ref.read(kisApiClientProvider)) == false) {
+      return;
+    }
+
+    final repository = ref.read(homeRepositoryProvider);
+    _setSectionSyncing(HomeSection.news, true);
+    try {
+      final newsItems = await repository.fetchHomeNews(state.newsItems);
+      final updatedAt = DateTime.now();
+      state = state.copyWith(
+        newsItems: newsItems,
+        lastUpdated: updatedAt,
+        sectionSyncStates: _updatedSectionState(
+          HomeSection.news,
+          isSyncing: false,
+          lastUpdated: updatedAt,
+          clearErrorMessage: true,
+        ),
+      );
+    } catch (_) {
+      _setSectionError(HomeSection.news, '뉴스를 다시 불러오지 못했습니다.');
+    }
+  }
+
+  Future<void> _refreshInvestorFlowSection() async {
+    if (await _ensureConfigAndToken(ref.read(kisApiClientProvider)) == false) {
+      return;
+    }
+
+    final repository = ref.read(homeRepositoryProvider);
+    _setSectionSyncing(HomeSection.investorFlow, true);
+    try {
+      final investorFlows = await repository.fetchInvestorFlows(
+        state.investorFlows,
+      );
+      final updatedAt = DateTime.now();
+      state = state.copyWith(
+        investorFlows: investorFlows,
+        lastUpdated: updatedAt,
+        sectionSyncStates: _updatedSectionState(
+          HomeSection.investorFlow,
+          isSyncing: false,
+          lastUpdated: updatedAt,
+          clearErrorMessage: true,
+        ),
+      );
+    } catch (_) {
+      _setSectionError(HomeSection.investorFlow, '투자자 수급을 다시 불러오지 못했습니다.');
+    }
+  }
+
+  Future<void> _refreshMomentumSection() async {
+    if (await _ensureConfigAndToken(ref.read(kisApiClientProvider)) == false) {
+      return;
+    }
+
+    final repository = ref.read(homeRepositoryProvider);
+    _setSectionSyncing(HomeSection.momentum, true);
+    try {
+      final results = await Future.wait([
+        repository.fetchDomesticTopMovers(state.domesticTopMovers),
+        repository.fetchDomesticVolumeLeaders(state.domesticVolumeLeaders),
+        repository.fetchOverseasTopMovers(state.overseasTopMovers),
+        repository.fetchOverseasVolumeLeaders(state.overseasVolumeLeaders),
+      ]);
+      final updatedAt = DateTime.now();
+      state = state.copyWith(
+        domesticTopMovers: results[0],
+        domesticVolumeLeaders: results[1],
+        overseasTopMovers: results[2],
+        overseasVolumeLeaders: results[3],
+        lastUpdated: updatedAt,
+        sectionSyncStates: _updatedSectionState(
+          HomeSection.momentum,
+          isSyncing: false,
+          lastUpdated: updatedAt,
+          clearErrorMessage: true,
+        ),
+      );
+    } catch (_) {
+      _setSectionError(HomeSection.momentum, '급등락/거래량 데이터를 다시 불러오지 못했습니다.');
+    }
+  }
+
   Future<bool> _ensureConfigAndToken(KisApiClient apiClient) async {
     state = state.copyWith(
       isSyncing: true,
@@ -279,10 +431,7 @@ class HomeViewModel extends Notifier<HomeViewState> {
 
     try {
       await apiClient.ensureAccessToken();
-      state = state.copyWith(
-        isSyncing: false,
-        syncStatus: HomeSyncStatus.idle,
-      );
+      state = state.copyWith(isSyncing: false, syncStatus: HomeSyncStatus.idle);
       return true;
     } on KisApiException catch (error) {
       state = state.copyWith(
@@ -332,13 +481,17 @@ class HomeViewModel extends Notifier<HomeViewState> {
     String? errorMessage,
     bool clearErrorMessage = false,
   }) {
-    final next = Map<HomeSection, HomeSectionSyncState>.from(state.sectionSyncStates);
-    next[section] = state.sectionState(section).copyWith(
-      lastUpdated: lastUpdated,
-      isSyncing: isSyncing,
-      errorMessage: errorMessage,
-      clearErrorMessage: clearErrorMessage,
+    final next = Map<HomeSection, HomeSectionSyncState>.from(
+      state.sectionSyncStates,
     );
+    next[section] = state
+        .sectionState(section)
+        .copyWith(
+          lastUpdated: lastUpdated,
+          isSyncing: isSyncing,
+          errorMessage: errorMessage,
+          clearErrorMessage: clearErrorMessage,
+        );
     return next;
   }
 
@@ -348,13 +501,61 @@ class HomeViewModel extends Notifier<HomeViewState> {
     }
 
     final realtimeService = ref.read(kisRealtimeServiceProvider);
-    _realtimeSubscription = realtimeService.stream.listen(_applyRealtimeSnapshot);
+    _applyRealtimeSnapshot(realtimeService.snapshot);
+    _realtimeSubscription = realtimeService.stream.listen(
+      _applyRealtimeSnapshot,
+    );
+  }
+
+  void _ensureMarketRefreshTimer() {
+    if (_marketRefreshTimer != null) {
+      return;
+    }
+
+    _marketRefreshTimer = Timer.periodic(_marketRefreshInterval, (_) {
+      unawaited(_refreshMarketSectionSilently());
+    });
+  }
+
+  Future<void> _refreshMarketSectionSilently() async {
+    if (state.sectionState(HomeSection.market).isSyncing || state.isSyncing) {
+      return;
+    }
+
+    try {
+      final apiClient = ref.read(kisApiClientProvider);
+      await apiClient.ensureAccessToken();
+      final repository = ref.read(homeRepositoryProvider);
+      final marketIndexes = await repository.fetchMarketIndexes(
+        state.marketIndexes,
+      );
+      final updatedAt = DateTime.now();
+      state = state.copyWith(
+        marketIndexes: marketIndexes,
+        lastUpdated: updatedAt,
+        sectionSyncStates: _updatedSectionState(
+          HomeSection.market,
+          isSyncing: false,
+          lastUpdated: updatedAt,
+          clearErrorMessage: true,
+        ),
+      );
+    } catch (_) {
+      // Keep the latest visible values if background polling fails.
+    }
   }
 
   Future<void> _syncRealtimeSubscription() async {
     final realtimeService = ref.read(kisRealtimeServiceProvider);
-    await realtimeService.connect(
+    await realtimeService.setSubscription(
+      ownerId: _subscriptionOwnerId,
       domesticCodes: state.domesticHoldings.map((holding) => holding.code),
+      overseasTargets: state.usHoldings.map(
+        (holding) => OverseasRealtimeTarget(
+          code: holding.code,
+          exchangeCode: holding.exchangeCode ?? 'NAS',
+        ),
+      ),
     );
   }
 
@@ -374,7 +575,8 @@ class HomeViewModel extends Notifier<HomeViewState> {
   }
 
   String _mapAccountErrorTitle(KisApiException error) {
-    if (error.apiCode == 'OPSQ2000' || error.message.contains('INVALID_CHECK_ACNO')) {
+    if (error.apiCode == 'OPSQ2000' ||
+        error.message.contains('INVALID_CHECK_ACNO')) {
       return '계좌 조회 실패';
     }
     if (error.statusCode == 401 || error.statusCode == 403) {
@@ -384,7 +586,8 @@ class HomeViewModel extends Notifier<HomeViewState> {
   }
 
   String _mapAccountErrorMessage(KisApiException error) {
-    if (error.apiCode == 'OPSQ2000' || error.message.contains('INVALID_CHECK_ACNO')) {
+    if (error.apiCode == 'OPSQ2000' ||
+        error.message.contains('INVALID_CHECK_ACNO')) {
       return '선택한 계좌번호 또는 상품코드를 확인해주세요.';
     }
     if (error.statusCode == 401 || error.statusCode == 403) {
@@ -394,39 +597,78 @@ class HomeViewModel extends Notifier<HomeViewState> {
   }
 
   void _applyRealtimeSnapshot(KisRealtimeSnapshot snapshot) {
-    final nextMarketIndexes = state.marketIndexes.map((index) {
-      if (index.name != '코스피' ||
-          snapshot.kospiValue == null ||
-          snapshot.kospiChangeRate == null ||
-          snapshot.kospiIsPositive == null) {
-        return index;
-      }
+    final nextMarketIndexes = state.marketIndexes
+        .map((index) {
+          if (index.name != '코스피' ||
+              snapshot.kospiValue == null ||
+              snapshot.kospiChangeRate == null ||
+              snapshot.kospiIsPositive == null) {
+            return index;
+          }
 
-      final rate = snapshot.kospiChangeRate!;
-      return index.copyWith(
-        value: snapshot.kospiValue!,
-        changeRate: '${rate >= 0 ? '+' : ''}${rate.toStringAsFixed(2)}%',
-        isPositive: snapshot.kospiIsPositive!,
-      );
-    }).toList(growable: false);
+          final rate = snapshot.kospiChangeRate!;
+          return index.copyWith(
+            value: snapshot.kospiValue!,
+            changeRate: '${rate >= 0 ? '+' : ''}${rate.toStringAsFixed(2)}%',
+            isPositive: snapshot.kospiIsPositive!,
+          );
+        })
+        .toList(growable: false);
 
-    final nextDomesticHoldings = state.domesticHoldings.map((holding) {
-      final realtime = snapshot.domesticStockPrices[holding.code];
-      if (realtime == null) {
-        return holding;
-      }
+    final nextDomesticHoldings = state.domesticHoldings
+        .map((holding) {
+          final realtime = snapshot.domesticStockPrices[holding.code];
+          if (realtime == null) {
+            return holding;
+          }
 
-      return holding.applyRealtimePrice(
-        nextPrice: realtime.currentPrice,
-        nextProfitRate: realtime.changeRate,
-        nextIsPositive: realtime.isPositive,
-      );
-    }).toList(growable: false);
+          return holding.applyRealtimePrice(nextPrice: realtime.currentPrice);
+        })
+        .toList(growable: false);
+
+    final nextUsHoldings = state.usHoldings
+        .map((holding) {
+          final exchangeCode = (holding.exchangeCode ?? 'NAS').toUpperCase();
+          final realtime = snapshot
+              .overseasStockPrices['$exchangeCode:${holding.code.toUpperCase()}'];
+          if (realtime == null) {
+            return holding;
+          }
+
+          final convertedPrice = _convertOverseasRealtimePriceToKrw(
+            holding: holding,
+            realtime: realtime,
+          );
+          return holding.applyRealtimePrice(nextPrice: convertedPrice);
+        })
+        .toList(growable: false);
 
     state = state.copyWith(
       marketIndexes: nextMarketIndexes,
       domesticHoldings: nextDomesticHoldings,
+      usHoldings: nextUsHoldings,
       lastUpdated: DateTime.now(),
     );
+  }
+
+  int _convertOverseasRealtimePriceToKrw({
+    required HoldingStock holding,
+    required RealtimeOverseasPrice realtime,
+  }) {
+    final exchangeRate = holding.exchangeRate;
+    if (exchangeRate == null || exchangeRate <= 0) {
+      return holding.currentPrice;
+    }
+
+    final scale = _pow10(realtime.priceDecimals);
+    return ((realtime.currentPrice / scale) * exchangeRate).round();
+  }
+
+  int _pow10(int exponent) {
+    var value = 1;
+    for (var index = 0; index < exponent; index++) {
+      value *= 10;
+    }
+    return value;
   }
 }

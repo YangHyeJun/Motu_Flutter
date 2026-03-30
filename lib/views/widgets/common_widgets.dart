@@ -14,19 +14,25 @@ class AppCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.border),
-        boxShadow: const [
-          BoxShadow(
-            color: AppColors.cardShadow,
-            blurRadius: 10,
-            offset: Offset(0, 4),
-          ),
-        ],
+        border: Border.all(
+          color: isDark ? colorScheme.outlineVariant : AppColors.border,
+        ),
+        boxShadow: isDark
+            ? const []
+            : const [
+                BoxShadow(
+                  color: AppColors.cardShadow,
+                  blurRadius: 10,
+                  offset: Offset(0, 4),
+                ),
+              ],
       ),
       child: child,
     );
@@ -78,34 +84,60 @@ class SectionHeader extends StatelessWidget {
 }
 
 class InfoBanner extends StatelessWidget {
-  const InfoBanner({super.key, required this.message, this.trailing});
+  const InfoBanner({
+    super.key,
+    required this.message,
+    this.trailing,
+    this.onDismiss,
+  });
 
   final String message;
   final Widget? trailing;
+  final VoidCallback? onDismiss;
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: AppColors.accentSoft,
+        color: isDark ? AppColors.darkAccentSoft : AppColors.accentSoft,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFBDECCF)),
+        border: Border.all(
+          color: isDark ? AppColors.darkAccent : const Color(0xFFBDECCF),
+        ),
       ),
       child: Row(
         children: [
-          const Icon(Icons.info_outline, color: AppColors.accent, size: 18),
+          Icon(
+            Icons.info_outline,
+            color: isDark ? AppColors.darkAccent : AppColors.accent,
+            size: 18,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               message,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: const Color(0xFF23A56D),
+                color: isDark ? AppColors.darkTextPrimary : const Color(0xFF23A56D),
                 fontWeight: FontWeight.w700,
               ),
             ),
           ),
           if (trailing != null) trailing!,
+          if (onDismiss != null)
+            IconButton(
+              onPressed: onDismiss,
+              icon: Icon(
+                Icons.close,
+                color: isDark ? AppColors.darkAccent : AppColors.accent,
+                size: 18,
+              ),
+              splashRadius: 18,
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+            ),
         ],
       ),
     );

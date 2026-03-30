@@ -11,7 +11,7 @@ class KisApiClient {
   KisApiClient(this._config);
 
   static const _tokenStorageKey = 'kis_access_token_v1';
-  static const _approvalKeyStorageKey = 'kis_approval_key_v1';
+  static const _legacyApprovalKeyStorageKey = 'kis_approval_key_v1';
   static const FlutterSecureStorage _secureStorage = FlutterSecureStorage();
 
   final KisApiConfig _config;
@@ -21,6 +21,7 @@ class KisApiClient {
   String? _cachedApprovalKey;
 
   bool get isConfigured => _config.isConfigured;
+
   bool get useMockServer => _config.useMockServer;
 
   Future<Map<String, dynamic>> get({
@@ -33,8 +34,14 @@ class KisApiClient {
       _config.resolve(path, queryParameters),
     );
 
-    request.headers.set(HttpHeaders.contentTypeHeader, 'application/json; charset=utf-8');
-    request.headers.set(HttpHeaders.authorizationHeader, '${token.tokenType} ${token.value}');
+    request.headers.set(
+      HttpHeaders.contentTypeHeader,
+      'application/json; charset=utf-8',
+    );
+    request.headers.set(
+      HttpHeaders.authorizationHeader,
+      '${token.tokenType} ${token.value}',
+    );
     request.headers.set('appkey', _config.appKey);
     request.headers.set('appsecret', _config.appSecret);
     request.headers.set('tr_id', trId);
@@ -48,7 +55,10 @@ class KisApiClient {
     required Map<String, dynamic> body,
   }) async {
     final request = await _httpClient.postUrl(_config.resolve(path));
-    request.headers.set(HttpHeaders.contentTypeHeader, 'application/json; charset=utf-8');
+    request.headers.set(
+      HttpHeaders.contentTypeHeader,
+      'application/json; charset=utf-8',
+    );
     request.write(jsonEncode(body));
     return _send(request);
   }
@@ -62,8 +72,14 @@ class KisApiClient {
     final token = await _getAccessToken();
     final request = await _httpClient.postUrl(_config.resolve(path));
 
-    request.headers.set(HttpHeaders.contentTypeHeader, 'application/json; charset=utf-8');
-    request.headers.set(HttpHeaders.authorizationHeader, '${token.tokenType} ${token.value}');
+    request.headers.set(
+      HttpHeaders.contentTypeHeader,
+      'application/json; charset=utf-8',
+    );
+    request.headers.set(
+      HttpHeaders.authorizationHeader,
+      '${token.tokenType} ${token.value}',
+    );
     request.headers.set('appkey', _config.appKey);
     request.headers.set('appsecret', _config.appSecret);
     request.headers.set('tr_id', trId);
@@ -80,16 +96,20 @@ class KisApiClient {
     return _send(request);
   }
 
-  Future<String> getApprovalKey() async {
+  Future<String> getApprovalKey({bool forceRefresh = false}) async {
     if (!isConfigured) {
       throw const KisApiException('KIS API 설정이 없습니다.');
     }
 
-    final cachedApprovalKey = _cachedApprovalKey ?? await _secureStorage.read(key: _approvalKeyStorageKey);
-    if (cachedApprovalKey != null && cachedApprovalKey.isNotEmpty) {
-      _cachedApprovalKey = cachedApprovalKey;
-      return cachedApprovalKey;
+    if (!forceRefresh) {
+      final cachedApprovalKey = _cachedApprovalKey;
+      if (cachedApprovalKey != null && cachedApprovalKey.isNotEmpty) {
+        return cachedApprovalKey;
+      }
     }
+
+    // Approval keys expire quickly, so avoid reusing an old persisted key.
+    await _safeDelete(_legacyApprovalKeyStorageKey);
 
     final response = await post(
       path: '/oauth2/Approval',
@@ -106,7 +126,6 @@ class KisApiClient {
     }
 
     _cachedApprovalKey = approvalKey;
-    await _secureStorage.write(key: _approvalKeyStorageKey, value: approvalKey);
     return approvalKey;
   }
 
@@ -141,16 +160,25 @@ class KisApiClient {
 
     final token = KisAccessToken.fromJson(response);
     _cachedToken = token;
-    await _secureStorage.write(
-      key: _tokenStorageKey,
-      value: jsonEncode(token.toJson()),
-    );
+    _cachedApprovalKey = null;
+    await _safeDelete(_legacyApprovalKeyStorageKey);
+    try {
+      await _secureStorage.write(
+        key: _tokenStorageKey,
+        value: jsonEncode(token.toJson()),
+      );
+    } catch (_) {
+      await _safeDelete(_tokenStorageKey);
+    }
     return token;
   }
 
   Future<String> _createHashKey(Map<String, dynamic> body) async {
     final request = await _httpClient.postUrl(_config.resolve('/uapi/hashkey'));
-    request.headers.set(HttpHeaders.contentTypeHeader, 'application/json; charset=utf-8');
+    request.headers.set(
+      HttpHeaders.contentTypeHeader,
+      'application/json; charset=utf-8',
+    );
     request.headers.set('appkey', _config.appKey);
     request.headers.set('appsecret', _config.appSecret);
     request.write(jsonEncode(body));
@@ -187,7 +215,14 @@ class KisApiClient {
   }
 
   Future<KisAccessToken?> _readStoredToken() async {
-    final raw = await _secureStorage.read(key: _tokenStorageKey);
+    String? raw;
+    try {
+      raw = await _secureStorage.read(key: _tokenStorageKey);
+    } catch (_) {
+      await _safeDelete(_tokenStorageKey);
+      return null;
+    }
+
     if (raw == null || raw.isEmpty) {
       return null;
     }
@@ -199,8 +234,14 @@ class KisApiClient {
       }
       return KisAccessToken.fromJson(decoded);
     } catch (_) {
-      await _secureStorage.delete(key: _tokenStorageKey);
+      await _safeDelete(_tokenStorageKey);
       return null;
     }
+  }
+
+  Future<void> _safeDelete(String key) async {
+    try {
+      await _secureStorage.delete(key: key);
+    } catch (_) {}
   }
 }

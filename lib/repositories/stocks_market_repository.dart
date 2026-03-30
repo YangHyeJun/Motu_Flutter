@@ -1,8 +1,9 @@
 import '../core/network/kis_api_client.dart';
 import '../models/models.dart';
+import 'stock_search_repository.dart';
 
 class StocksMarketRepository {
-  StocksMarketRepository(this._apiClient);
+  StocksMarketRepository(this._apiClient, this._stockSearchRepository);
 
   static const _usExchanges = [
     ('NAS', '미국 · 나스닥', '512'),
@@ -11,6 +12,7 @@ class StocksMarketRepository {
   ];
 
   final KisApiClient _apiClient;
+  final StockSearchRepository _stockSearchRepository;
 
   Future<List<RankingStock>> fetchMarketStocks({
     required String market,
@@ -18,16 +20,50 @@ class StocksMarketRepository {
   }) async {
     switch (market) {
       case 'overseas':
-        return _fetchOverseasCategory(category);
+        return _reRankStocks(await _fetchOverseasCategory(category));
       case 'all':
-        return _mergeAllUnique([
-          await _fetchDomesticCategory(category),
-          await _fetchOverseasCategory(category),
-        ]);
+        return _reRankStocks(
+          _mergeAllUnique([
+            await _fetchDomesticCategory(category),
+            await _fetchOverseasCategory(category),
+          ]),
+        );
       case 'domestic':
       default:
-        return _fetchDomesticCategory(category);
+        return _reRankStocks(await _fetchDomesticCategory(category));
     }
+  }
+
+  Future<List<RankingStock>> fetchDomesticTopMovers({int limit = 5}) async {
+    return _reRankStocks(
+      (await _fetchDomesticChangeRateStocks(riseOnly: true))
+          .take(limit)
+          .toList(growable: false),
+    );
+  }
+
+  Future<List<RankingStock>> fetchDomesticVolumeLeaders({int limit = 5}) async {
+    return _reRankStocks(
+      (await _fetchDomesticVolumeRankStocks(
+        sortByTradeAmount: false,
+      )).take(limit).toList(growable: false),
+    );
+  }
+
+  Future<List<RankingStock>> fetchOverseasTopMovers({int limit = 5}) async {
+    return _reRankStocks(
+      (await _fetchOverseasChangeRateStocks(riseOnly: true))
+          .take(limit)
+          .toList(growable: false),
+    );
+  }
+
+  Future<List<RankingStock>> fetchOverseasVolumeLeaders({int limit = 5}) async {
+    return _reRankStocks(
+      (await _fetchOverseasVolumeRankStocks(
+        sortByTradeAmount: false,
+      )).take(limit).toList(growable: false),
+    );
   }
 
   Future<List<RankingStock>> searchStocks(String query) async {
@@ -36,48 +72,236 @@ class StocksMarketRepository {
       return const [];
     }
 
-    final responses = await Future.wait([
-      _fetchDomesticCategory('tradeAmount'),
-      _fetchDomesticCategory('volume'),
-      _fetchDomesticCategory('changeRate'),
-      _fetchDomesticCategory('marketCap'),
-      _fetchOverseasCategory('tradeAmount'),
-      _fetchOverseasCategory('volume'),
-      _fetchOverseasCategory('changeRate'),
-      _fetchOverseasCategory('marketCap'),
-    ]);
+    final searchEntries = await _stockSearchRepository.searchEntries(query);
+    if (searchEntries.isEmpty) {
+      final exact = await _searchExactUsStocks(query);
+      return _reRankStocks(exact);
+    }
 
-    final byCode = <String, RankingStock>{};
-    for (final stocks in responses) {
-      for (final stock in stocks) {
-        if (!_matchesQuery(stock, normalizedQuery)) {
-          continue;
-        }
-        byCode.putIfAbsent(_stockKey(stock), () => stock);
-      }
+    final seeded = <String, RankingStock>{};
+    final candidates = searchEntries.take(40).toList(growable: false);
+    final liveResults = await Future.wait([
+      for (final entry in candidates)
+        _fetchSearchQuote(entry.toFallbackRankingStock(rank: 0)),
+    ]);
+    for (var index = 0; index < candidates.length; index++) {
+      final fallback = candidates[index].toFallbackRankingStock(rank: 0);
+      seeded[_stockKey(fallback)] = liveResults[index] ?? fallback;
     }
 
     final exact = await _searchExactUsStocks(query);
     for (final stock in exact) {
-      byCode[_stockKey(stock)] = stock;
+      seeded[_stockKey(stock)] = stock;
     }
 
-    final results = byCode.values.toList(growable: false);
+    final results = seeded.values.toList(growable: false);
     results.sort((left, right) {
-      final scoreComparison = _score(right, normalizedQuery).compareTo(_score(left, normalizedQuery));
+      final scoreComparison = _score(
+        right,
+        normalizedQuery,
+      ).compareTo(_score(left, normalizedQuery));
       if (scoreComparison != 0) {
         return scoreComparison;
       }
-
       return left.name.compareTo(right.name);
     });
-    return results;
+    return _reRankStocks(results.take(50).toList(growable: false));
+  }
+
+  Future<Map<String, RankingStock>> fetchLiveStocks(
+    List<RankingStock> stocks,
+  ) async {
+    final entries = await Future.wait(
+      stocks.map((stock) async {
+        if (stock.marketType == StockMarketType.overseas) {
+          try {
+            final quote = await _apiClient.get(
+              path: '/uapi/overseas-price/v1/quotations/price',
+              trId: 'HHDFS00000300',
+              queryParameters: {
+                'AUTH': '',
+                'EXCD': stock.exchangeCode ?? 'NAS',
+                'SYMB': stock.code,
+              },
+            );
+            final output =
+                quote['output'] as Map<String, dynamic>? ?? <String, dynamic>{};
+            final decimals = _resolvePriceDecimals(
+              output['zdiv'],
+              fallback: stock.priceDecimals,
+            );
+            final scale = _pow10(decimals);
+            final price = (_toDouble(output['last']) * scale).round();
+            final previousClosePrice = (_toDouble(output['base']) * scale)
+                .round();
+            final changeRate = _resolveOverseasChangeRate(
+              currentPrice: price,
+              previousClosePrice: previousClosePrice,
+              fallbackRate: _toDouble(output['rate']),
+            );
+            return MapEntry(
+              _stockKey(stock),
+              RankingStock(
+                rank: stock.rank,
+                name: stock.name,
+                code: stock.code,
+                price: price,
+                changeRate: changeRate,
+                extraLabel: stock.extraLabel,
+                extraValue: stock.extraValue,
+                isPositive: _resolveOverseasIsPositive(
+                  currentPrice: price,
+                  previousClosePrice: previousClosePrice,
+                  sign: output['sign'] as String?,
+                  fallbackRate: changeRate,
+                ),
+                marketType: stock.marketType,
+                exchangeCode: stock.exchangeCode,
+                productTypeCode: stock.productTypeCode,
+                marketLabel: stock.marketLabel,
+                currencySymbol: stock.currencySymbol,
+                priceDecimals: decimals,
+              ),
+            );
+          } catch (_) {
+            return null;
+          }
+        }
+
+        try {
+          final quote = await _apiClient.get(
+            path: '/uapi/domestic-stock/v1/quotations/inquire-price',
+            trId: 'FHKST01010100',
+            queryParameters: {
+              'FID_COND_MRKT_DIV_CODE': 'J',
+              'FID_INPUT_ISCD': stock.code,
+            },
+          );
+          final output =
+              quote['output'] as Map<String, dynamic>? ?? <String, dynamic>{};
+          final changeRate = _toDouble(output['prdy_ctrt']);
+          return MapEntry(
+            _stockKey(stock),
+            RankingStock(
+              rank: stock.rank,
+              name: stock.name,
+              code: stock.code,
+              price: _toInt(output['stck_prpr']),
+              changeRate: changeRate,
+              extraLabel: stock.extraLabel,
+              extraValue: stock.extraValue,
+              isPositive: _isPositive(
+                output['prdy_vrss_sign'] as String?,
+                changeRate,
+              ),
+              marketType: stock.marketType,
+              exchangeCode: stock.exchangeCode,
+              productTypeCode: stock.productTypeCode,
+              marketLabel: stock.marketLabel,
+              currencySymbol: stock.currencySymbol,
+              priceDecimals: stock.priceDecimals,
+            ),
+          );
+        } catch (_) {
+          return null;
+        }
+      }),
+    );
+
+    return {
+      for (final entry in entries.whereType<MapEntry<String, RankingStock>>())
+        entry.key: entry.value,
+    };
+  }
+
+  Future<RankingStock?> _fetchSearchQuote(RankingStock stock) async {
+    try {
+      if (stock.marketType == StockMarketType.overseas) {
+        final quote = await _apiClient.get(
+          path: '/uapi/overseas-price/v1/quotations/price',
+          trId: 'HHDFS00000300',
+          queryParameters: {
+            'AUTH': '',
+            'EXCD': stock.exchangeCode ?? 'NAS',
+            'SYMB': stock.code,
+          },
+        );
+        final output =
+            quote['output'] as Map<String, dynamic>? ?? <String, dynamic>{};
+        final decimals = _resolvePriceDecimals(
+          output['zdiv'],
+          fallback: stock.priceDecimals,
+        );
+        final scale = _pow10(decimals);
+        final price = (_toDouble(output['last']) * scale).round();
+        final previousClosePrice = (_toDouble(output['base']) * scale).round();
+        final changeRate = _resolveOverseasChangeRate(
+          currentPrice: price,
+          previousClosePrice: previousClosePrice,
+          fallbackRate: _toDouble(output['rate']),
+        );
+        return RankingStock(
+          rank: stock.rank,
+          name: stock.name,
+          code: stock.code,
+          price: price,
+          changeRate: changeRate,
+          extraLabel: stock.extraLabel,
+          extraValue: stock.extraValue,
+          isPositive: _resolveOverseasIsPositive(
+            currentPrice: price,
+            previousClosePrice: previousClosePrice,
+            sign: output['sign'] as String?,
+            fallbackRate: changeRate,
+          ),
+          marketType: stock.marketType,
+          exchangeCode: stock.exchangeCode,
+          productTypeCode: stock.productTypeCode,
+          marketLabel: stock.marketLabel,
+          currencySymbol: stock.currencySymbol,
+          priceDecimals: decimals,
+        );
+      }
+
+      final quote = await _apiClient.get(
+        path: '/uapi/domestic-stock/v1/quotations/inquire-price',
+        trId: 'FHKST01010100',
+        queryParameters: {
+          'FID_COND_MRKT_DIV_CODE': 'J',
+          'FID_INPUT_ISCD': stock.code,
+        },
+      );
+      final output =
+          quote['output'] as Map<String, dynamic>? ?? <String, dynamic>{};
+      final changeRate = _toDouble(output['prdy_ctrt']);
+      return RankingStock(
+        rank: stock.rank,
+        name: stock.name,
+        code: stock.code,
+        price: _toInt(output['stck_prpr']),
+        changeRate: changeRate,
+        extraLabel: stock.extraLabel,
+        extraValue: stock.extraValue,
+        isPositive: _isPositive(
+          output['prdy_vrss_sign'] as String?,
+          changeRate,
+        ),
+        marketType: stock.marketType,
+        exchangeCode: stock.exchangeCode,
+        productTypeCode: stock.productTypeCode,
+        marketLabel: stock.marketLabel,
+        currencySymbol: stock.currencySymbol,
+        priceDecimals: stock.priceDecimals,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<List<RankingStock>> _fetchDomesticCategory(String category) {
     switch (category) {
       case 'changeRate':
-        return _fetchDomesticChangeRateStocks();
+        return _fetchDomesticChangeRateStocks(riseOnly: false);
       case 'marketCap':
         return _fetchDomesticMarketCapStocks();
       case 'volume':
@@ -91,7 +315,7 @@ class StocksMarketRepository {
   Future<List<RankingStock>> _fetchOverseasCategory(String category) {
     switch (category) {
       case 'changeRate':
-        return _fetchOverseasChangeRateStocks();
+        return _fetchOverseasChangeRateStocks(riseOnly: false);
       case 'marketCap':
         return _fetchOverseasMarketCapStocks();
       case 'volume':
@@ -136,7 +360,10 @@ class StocksMarketRepository {
             extraValue: sortByTradeAmount
                 ? _formatNumber(_toInt(item['acml_tr_pbmn']))
                 : '${_formatNumber(_toInt(item['acml_vol']))}주',
-            isPositive: _isPositive(item['prdy_vrss_sign'] as String?, _toDouble(item['prdy_ctrt'])),
+            isPositive: _isPositive(
+              item['prdy_vrss_sign'] as String?,
+              _toDouble(item['prdy_ctrt']),
+            ),
             marketType: StockMarketType.domestic,
             marketLabel: '국내',
           ),
@@ -144,7 +371,9 @@ class StocksMarketRepository {
         .toList(growable: false);
   }
 
-  Future<List<RankingStock>> _fetchDomesticChangeRateStocks() async {
+  Future<List<RankingStock>> _fetchDomesticChangeRateStocks({
+    required bool riseOnly,
+  }) async {
     final response = await _apiClient.get(
       path: '/uapi/domestic-stock/v1/ranking/fluctuation',
       trId: 'FHPST01700000',
@@ -152,7 +381,7 @@ class StocksMarketRepository {
         'fid_cond_mrkt_div_code': 'J',
         'fid_cond_scr_div_code': '20170',
         'fid_input_iscd': '0000',
-        'fid_rank_sort_cls_code': '0',
+        'fid_rank_sort_cls_code': riseOnly ? '1' : '0',
         'fid_input_cnt_1': '0',
         'fid_prc_cls_code': '1',
         'fid_input_price_1': '',
@@ -177,11 +406,15 @@ class StocksMarketRepository {
             changeRate: _toDouble(item['prdy_ctrt']),
             extraLabel: '등락률',
             extraValue: '${_toDouble(item['prdy_ctrt']).toStringAsFixed(2)}%',
-            isPositive: _isPositive(item['prdy_vrss_sign'] as String?, _toDouble(item['prdy_ctrt'])),
+            isPositive: _isPositive(
+              item['prdy_vrss_sign'] as String?,
+              _toDouble(item['prdy_ctrt']),
+            ),
             marketType: StockMarketType.domestic,
             marketLabel: '국내',
           ),
         )
+        .where((item) => !riseOnly || item.isPositive)
         .toList(growable: false);
   }
 
@@ -213,7 +446,10 @@ class StocksMarketRepository {
             changeRate: _toDouble(item['prdy_ctrt']),
             extraLabel: '시가총액',
             extraValue: _formatMarketCap(item['hts_avls'] ?? item['data_val']),
-            isPositive: _isPositive(item['prdy_vrss_sign'] as String?, _toDouble(item['prdy_ctrt'])),
+            isPositive: _isPositive(
+              item['prdy_vrss_sign'] as String?,
+              _toDouble(item['prdy_ctrt']),
+            ),
             marketType: StockMarketType.domestic,
             marketLabel: '국내',
           ),
@@ -257,7 +493,9 @@ class StocksMarketRepository {
     return stocks;
   }
 
-  Future<List<RankingStock>> _fetchOverseasChangeRateStocks() async {
+  Future<List<RankingStock>> _fetchOverseasChangeRateStocks({
+    required bool riseOnly,
+  }) async {
     final stocks = <RankingStock>[];
     for (final exchange in _usExchanges) {
       final response = await _apiClient.get(
@@ -267,7 +505,7 @@ class StocksMarketRepository {
           'KEYB': '',
           'AUTH': '',
           'EXCD': exchange.$1,
-          'GUBN': '1',
+          'GUBN': riseOnly ? '1' : '',
           'NDAY': '0',
           'VOL_RANG': '0',
         },
@@ -279,11 +517,15 @@ class StocksMarketRepository {
           marketLabel: exchange.$2,
           productTypeCode: exchange.$3,
           extraLabel: '등락률',
-          extraValueBuilder: (item) => '${_toDouble(item['rate']).toStringAsFixed(2)}%',
+          extraValueBuilder: (item) =>
+              '${_toDouble(item['rate']).toStringAsFixed(2)}%',
         ),
       );
     }
-    return stocks;
+    if (!riseOnly) {
+      return stocks;
+    }
+    return stocks.where((stock) => stock.isPositive).toList(growable: false);
   }
 
   Future<List<RankingStock>> _fetchOverseasMarketCapStocks() async {
@@ -325,12 +567,10 @@ class StocksMarketRepository {
         final info = await _apiClient.get(
           path: '/uapi/overseas-price/v1/quotations/search-info',
           trId: 'CTPF1702R',
-          queryParameters: {
-            'PRDT_TYPE_CD': exchange.$3,
-            'PDNO': normalized,
-          },
+          queryParameters: {'PRDT_TYPE_CD': exchange.$3, 'PDNO': normalized},
         );
-        final output = info['output'] as Map<String, dynamic>? ?? <String, dynamic>{};
+        final output =
+            info['output'] as Map<String, dynamic>? ?? <String, dynamic>{};
         final productName = output['prdt_name'] as String? ?? '';
         if (productName.isEmpty) {
           continue;
@@ -345,19 +585,36 @@ class StocksMarketRepository {
             'SYMB': normalized,
           },
         );
-        final quoteOutput = quote['output'] as Map<String, dynamic>? ?? <String, dynamic>{};
-        final decimals = _resolvePriceDecimals(quoteOutput['zdiv'], fallback: 2);
+        final quoteOutput =
+            quote['output'] as Map<String, dynamic>? ?? <String, dynamic>{};
+        final decimals = _resolvePriceDecimals(
+          quoteOutput['zdiv'],
+          fallback: 2,
+        );
         final scale = _pow10(decimals);
+        final price = (_toDouble(quoteOutput['last']) * scale).round();
+        final previousClosePrice = (_toDouble(quoteOutput['base']) * scale)
+            .round();
+        final changeRate = _resolveOverseasChangeRate(
+          currentPrice: price,
+          previousClosePrice: previousClosePrice,
+          fallbackRate: _toDouble(quoteOutput['rate']),
+        );
         results.add(
           RankingStock(
             rank: 0,
             name: productName,
             code: normalized,
-            price: (_toDouble(quoteOutput['last']) * scale).round(),
-            changeRate: _toDouble(quoteOutput['rate']),
+            price: price,
+            changeRate: changeRate,
             extraLabel: '직접 검색',
             extraValue: exchange.$2,
-            isPositive: _isPositive(quoteOutput['sign'] as String?, _toDouble(quoteOutput['rate'])),
+            isPositive: _resolveOverseasIsPositive(
+              currentPrice: price,
+              previousClosePrice: previousClosePrice,
+              sign: quoteOutput['sign'] as String?,
+              fallbackRate: changeRate,
+            ),
             marketType: StockMarketType.overseas,
             exchangeCode: exchange.$1,
             productTypeCode: exchange.$3,
@@ -381,26 +638,35 @@ class StocksMarketRepository {
     required String extraLabel,
     required String Function(Map<String, dynamic> item) extraValueBuilder,
   }) {
-    return rawItems.whereType<Map<String, dynamic>>().map((item) {
-      final decimals = _resolvePriceDecimals(item['zdiv'], fallback: _detectDecimalPlaces(item['last']));
-      final scale = _pow10(decimals);
-      return RankingStock(
-        rank: _toInt(item['rank']),
-        name: item['name'] as String? ?? '',
-        code: item['symb'] as String? ?? '',
-        price: (_toDouble(item['last']) * scale).round(),
-        changeRate: _toDouble(item['rate']),
-        extraLabel: extraLabel,
-        extraValue: extraValueBuilder(item),
-        isPositive: _isPositive(item['sign'] as String?, _toDouble(item['rate'])),
-        marketType: StockMarketType.overseas,
-        exchangeCode: exchangeCode,
-        productTypeCode: productTypeCode,
-        marketLabel: marketLabel,
-        currencySymbol: r'$',
-        priceDecimals: decimals,
-      );
-    }).toList(growable: false);
+    return rawItems
+        .whereType<Map<String, dynamic>>()
+        .map((item) {
+          final decimals = _resolvePriceDecimals(
+            item['zdiv'],
+            fallback: _detectDecimalPlaces(item['last']),
+          );
+          final scale = _pow10(decimals);
+          return RankingStock(
+            rank: _toInt(item['rank']),
+            name: item['name'] as String? ?? '',
+            code: item['symb'] as String? ?? '',
+            price: (_toDouble(item['last']) * scale).round(),
+            changeRate: _toDouble(item['rate']),
+            extraLabel: extraLabel,
+            extraValue: extraValueBuilder(item),
+            isPositive: _isPositive(
+              item['sign'] as String?,
+              _toDouble(item['rate']),
+            ),
+            marketType: StockMarketType.overseas,
+            exchangeCode: exchangeCode,
+            productTypeCode: productTypeCode,
+            marketLabel: marketLabel,
+            currencySymbol: r'$',
+            priceDecimals: decimals,
+          );
+        })
+        .toList(growable: false);
   }
 
   List<RankingStock> _mergeAllUnique(List<List<RankingStock>> groups) {
@@ -411,6 +677,28 @@ class StocksMarketRepository {
       }
     }
     return byKey.values.toList(growable: false);
+  }
+
+  List<RankingStock> _reRankStocks(List<RankingStock> stocks) {
+    return [
+      for (var index = 0; index < stocks.length; index++)
+        RankingStock(
+          rank: index + 1,
+          name: stocks[index].name,
+          code: stocks[index].code,
+          price: stocks[index].price,
+          changeRate: stocks[index].changeRate,
+          extraLabel: stocks[index].extraLabel,
+          extraValue: stocks[index].extraValue,
+          isPositive: stocks[index].isPositive,
+          marketType: stocks[index].marketType,
+          exchangeCode: stocks[index].exchangeCode,
+          productTypeCode: stocks[index].productTypeCode,
+          marketLabel: stocks[index].marketLabel,
+          currencySymbol: stocks[index].currencySymbol,
+          priceDecimals: stocks[index].priceDecimals,
+        ),
+    ];
   }
 
   String _stockKey(RankingStock stock) {
@@ -439,11 +727,27 @@ class StocksMarketRepository {
     }
   }
 
-  bool _matchesQuery(RankingStock stock, String query) {
-    final name = stock.name.toLowerCase();
-    final code = stock.code.toLowerCase();
-    final market = stock.marketLabel.toLowerCase();
-    return name.contains(query) || code.contains(query) || market.contains(query);
+  double _resolveOverseasChangeRate({
+    required int currentPrice,
+    required int previousClosePrice,
+    required double fallbackRate,
+  }) {
+    if (currentPrice > 0 && previousClosePrice > 0) {
+      return ((currentPrice - previousClosePrice) / previousClosePrice) * 100;
+    }
+    return fallbackRate;
+  }
+
+  bool _resolveOverseasIsPositive({
+    required int currentPrice,
+    required int previousClosePrice,
+    required String? sign,
+    required double fallbackRate,
+  }) {
+    if (currentPrice > 0 && previousClosePrice > 0) {
+      return currentPrice >= previousClosePrice;
+    }
+    return _isPositive(sign, fallbackRate);
   }
 
   int _score(RankingStock stock, String query) {

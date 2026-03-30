@@ -2,8 +2,31 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
 
-class SplashScreen extends StatelessWidget {
+class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
+
+  @override
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -93,22 +116,20 @@ class SplashScreen extends StatelessWidget {
                   ),
                 ),
                 const Spacer(flex: 4),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(
-                    3,
-                    (index) => Container(
-                      width: 8,
-                      height: 8,
-                      margin: const EdgeInsets.symmetric(horizontal: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(
-                          alpha: index == 1 ? 1 : 0.55,
+                AnimatedBuilder(
+                  animation: _controller,
+                  builder: (context, _) {
+                    return Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: List.generate(
+                        3,
+                        (index) => _SplashDot(
+                          progress: _controller.value,
+                          phase: index * 0.18,
                         ),
-                        shape: BoxShape.circle,
                       ),
-                    ),
-                  ),
+                    );
+                  },
                 ),
                 const SizedBox(height: 16),
                 const Text(
@@ -132,6 +153,29 @@ class SplashScreen extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _SplashDot extends StatelessWidget {
+  const _SplashDot({required this.progress, required this.phase});
+
+  final double progress;
+  final double phase;
+
+  @override
+  Widget build(BuildContext context) {
+    final shifted = (progress - phase).clamp(0.0, 1.0);
+    final pulse = 0.35 + ((1 - (shifted - 0.5).abs() * 2) * 0.65);
+
+    return Container(
+      width: 8,
+      height: 8,
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: pulse.clamp(0.25, 1.0)),
+        shape: BoxShape.circle,
       ),
     );
   }

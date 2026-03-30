@@ -36,6 +36,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   flutter_riverpod: ^2.6.1
   flutter_secure_storage: ^9.2.2
+  url_launcher: ^6.3.1
 
 dev_dependencies:
   flutter_test:
@@ -72,6 +73,9 @@ flutter:
           weight: 700
         - asset: assets/fonts/Pretendard-ExtraBold.ttf
           weight: 800
+
+  assets:
+    - assets/data/stock_search_index.json
 
   # To add assets to your application, add an assets section, like this:
   # assets:

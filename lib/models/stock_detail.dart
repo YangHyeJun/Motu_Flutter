@@ -19,8 +19,10 @@ class StockDetail {
     this.marketLabel = '',
     this.currencySymbol = '원',
     this.priceDecimals = 0,
+    this.exchangeRate,
     this.orderBook = const [],
     this.infoItems = const [],
+    this.infoSections = const [],
   });
 
   final String name;
@@ -40,24 +42,34 @@ class StockDetail {
   final String marketLabel;
   final String currencySymbol;
   final int priceDecimals;
+  final double? exchangeRate;
   final List<StockOrderBookLevel> orderBook;
   final List<StockInfoItem> infoItems;
+  final List<StockInfoSection> infoSections;
 
   List<double> get normalizedChartPoints {
     if (chartEntries.isEmpty) {
       return const [];
     }
 
-    final prices = chartEntries.map((entry) => entry.closePrice.toDouble()).toList();
-    final minPrice = prices.reduce((left, right) => left < right ? left : right);
-    final maxPrice = prices.reduce((left, right) => left > right ? left : right);
+    final prices = chartEntries
+        .map((entry) => entry.closePrice.toDouble())
+        .toList();
+    final minPrice = prices.reduce(
+      (left, right) => left < right ? left : right,
+    );
+    final maxPrice = prices.reduce(
+      (left, right) => left > right ? left : right,
+    );
     final gap = maxPrice - minPrice;
 
     if (gap == 0) {
       return List<double>.filled(prices.length, 0.5);
     }
 
-    return prices.map((price) => (price - minPrice) / gap).toList(growable: false);
+    return prices
+        .map((price) => (price - minPrice) / gap)
+        .toList(growable: false);
   }
 
   StockDetail copyWith({
@@ -78,8 +90,10 @@ class StockDetail {
     String? marketLabel,
     String? currencySymbol,
     int? priceDecimals,
+    double? exchangeRate,
     List<StockOrderBookLevel>? orderBook,
     List<StockInfoItem>? infoItems,
+    List<StockInfoSection>? infoSections,
   }) {
     return StockDetail(
       name: name ?? this.name,
@@ -99,10 +113,34 @@ class StockDetail {
       marketLabel: marketLabel ?? this.marketLabel,
       currencySymbol: currencySymbol ?? this.currencySymbol,
       priceDecimals: priceDecimals ?? this.priceDecimals,
+      exchangeRate: exchangeRate ?? this.exchangeRate,
       orderBook: orderBook ?? this.orderBook,
       infoItems: infoItems ?? this.infoItems,
+      infoSections: infoSections ?? this.infoSections,
     );
   }
+}
+
+class StockLiveQuote {
+  const StockLiveQuote({
+    required this.currentPrice,
+    required this.changeRate,
+    required this.isPositive,
+    required this.openPrice,
+    required this.highPrice,
+    required this.lowPrice,
+    required this.volume,
+    this.exchangeRate,
+  });
+
+  final int currentPrice;
+  final double changeRate;
+  final bool isPositive;
+  final int openPrice;
+  final int highPrice;
+  final int lowPrice;
+  final int volume;
+  final double? exchangeRate;
 }
 
 enum StockChartPeriod {
@@ -152,11 +190,15 @@ class StockOrderBookLevel {
 }
 
 class StockInfoItem {
-  const StockInfoItem({
-    required this.label,
-    required this.value,
-  });
+  const StockInfoItem({required this.label, required this.value});
 
   final String label;
   final String value;
+}
+
+class StockInfoSection {
+  const StockInfoSection({required this.title, required this.items});
+
+  final String title;
+  final List<StockInfoItem> items;
 }

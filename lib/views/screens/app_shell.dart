@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
+import 'favorites_screen.dart';
 import 'home_screen.dart';
 import 'more_screen.dart';
 import 'splash_screen.dart';
@@ -40,6 +41,7 @@ class _AppShellState extends State<AppShell> {
     final screens = [
       const HomeScreen(),
       const StocksScreen(),
+      const FavoritesScreen(),
       const MoreScreen(),
     ];
 
@@ -50,7 +52,7 @@ class _AppShellState extends State<AppShell> {
         onTap: (index) => setState(() => currentIndex = index),
         selectedItemColor: AppColors.accent,
         unselectedItemColor: AppColors.textSecondary,
-        backgroundColor: Colors.white,
+        backgroundColor: Theme.of(context).cardColor,
         type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(
@@ -59,6 +61,11 @@ class _AppShellState extends State<AppShell> {
             label: '홈',
           ),
           BottomNavigationBarItem(icon: Icon(Icons.show_chart), label: '주식'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.star_outline_rounded),
+            activeIcon: Icon(Icons.star_rounded),
+            label: '즐겨찾기',
+          ),
           BottomNavigationBarItem(icon: Icon(Icons.menu), label: '더보기'),
         ],
       ),

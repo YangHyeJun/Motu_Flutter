@@ -1,16 +1,15 @@
 import '../models/models.dart';
 
-enum HomeSyncStatus {
-  idle,
-  authenticating,
-  loadingAccount,
-}
+enum HomeSyncStatus { idle, authenticating, loadingAccount }
 
 enum HomeSection {
   summary,
   market,
   domesticHoldings,
   usHoldings,
+  news,
+  investorFlow,
+  momentum,
   shortSell,
 }
 
@@ -34,7 +33,9 @@ class HomeSectionSyncState {
     return HomeSectionSyncState(
       lastUpdated: lastUpdated ?? this.lastUpdated,
       isSyncing: isSyncing ?? this.isSyncing,
-      errorMessage: clearErrorMessage ? null : errorMessage ?? this.errorMessage,
+      errorMessage: clearErrorMessage
+          ? null
+          : errorMessage ?? this.errorMessage,
     );
   }
 }
@@ -45,6 +46,12 @@ class HomeViewState {
     required this.marketIndexes,
     required this.domesticHoldings,
     required this.usHoldings,
+    required this.newsItems,
+    required this.investorFlows,
+    required this.domesticTopMovers,
+    required this.domesticVolumeLeaders,
+    required this.overseasTopMovers,
+    required this.overseasVolumeLeaders,
     required this.shortSellRankings,
     required this.lastUpdated,
     required this.isSyncing,
@@ -58,6 +65,12 @@ class HomeViewState {
   final List<MarketIndex> marketIndexes;
   final List<HoldingStock> domesticHoldings;
   final List<HoldingStock> usHoldings;
+  final List<HomeNewsItem> newsItems;
+  final List<HomeInvestorFlow> investorFlows;
+  final List<RankingStock> domesticTopMovers;
+  final List<RankingStock> domesticVolumeLeaders;
+  final List<RankingStock> overseasTopMovers;
+  final List<RankingStock> overseasVolumeLeaders;
   final List<RankingStock> shortSellRankings;
   final DateTime lastUpdated;
   final bool isSyncing;
@@ -68,10 +81,7 @@ class HomeViewState {
 
   HomeSectionSyncState sectionState(HomeSection section) {
     return sectionSyncStates[section] ??
-        HomeSectionSyncState(
-          lastUpdated: lastUpdated,
-          isSyncing: false,
-        );
+        HomeSectionSyncState(lastUpdated: lastUpdated, isSyncing: false);
   }
 
   HomeViewState copyWith({
@@ -79,6 +89,12 @@ class HomeViewState {
     List<MarketIndex>? marketIndexes,
     List<HoldingStock>? domesticHoldings,
     List<HoldingStock>? usHoldings,
+    List<HomeNewsItem>? newsItems,
+    List<HomeInvestorFlow>? investorFlows,
+    List<RankingStock>? domesticTopMovers,
+    List<RankingStock>? domesticVolumeLeaders,
+    List<RankingStock>? overseasTopMovers,
+    List<RankingStock>? overseasVolumeLeaders,
     List<RankingStock>? shortSellRankings,
     DateTime? lastUpdated,
     bool? isSyncing,
@@ -93,6 +109,14 @@ class HomeViewState {
       marketIndexes: marketIndexes ?? this.marketIndexes,
       domesticHoldings: domesticHoldings ?? this.domesticHoldings,
       usHoldings: usHoldings ?? this.usHoldings,
+      newsItems: newsItems ?? this.newsItems,
+      investorFlows: investorFlows ?? this.investorFlows,
+      domesticTopMovers: domesticTopMovers ?? this.domesticTopMovers,
+      domesticVolumeLeaders:
+          domesticVolumeLeaders ?? this.domesticVolumeLeaders,
+      overseasTopMovers: overseasTopMovers ?? this.overseasTopMovers,
+      overseasVolumeLeaders:
+          overseasVolumeLeaders ?? this.overseasVolumeLeaders,
       shortSellRankings: shortSellRankings ?? this.shortSellRankings,
       lastUpdated: lastUpdated ?? this.lastUpdated,
       isSyncing: isSyncing ?? this.isSyncing,
