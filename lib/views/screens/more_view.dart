@@ -545,7 +545,7 @@ class AccountSelectionScreen extends ConsumerWidget {
                     onTap: () {
                       selectedAccountNotifier.state = account.id;
                       ref.invalidate(homeRepositoryProvider);
-                      ref.invalidate(kisRealtimeServiceProvider);
+                      ref.invalidate(kisRealtimeConfProvider);
                       ref.invalidate(homeViewModelProvider);
                       Navigator.of(context).pop();
                     },

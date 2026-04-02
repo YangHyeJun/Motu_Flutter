@@ -6,6 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../core/network/kis_api_client.dart';
 import '../core/network/kis_api_config.dart';
+import '../core/network/kis_realtime_conf.dart';
 import '../core/network/kis_realtime_service.dart';
 import '../models/models.dart';
 import '../repositories/home_repository.dart';
@@ -14,6 +15,7 @@ import '../repositories/market_index_detail_repository.dart';
 import '../repositories/stock_detail_repository.dart';
 import '../repositories/stock_search_repository.dart';
 import '../repositories/stocks_market_repository.dart';
+import '../viewmodels/app_shell_view_model.dart';
 import '../viewmodels/detail_action_view_model.dart';
 import '../viewmodels/favorites_view_model.dart';
 import '../viewmodels/favorites_view_state.dart';
@@ -190,6 +192,14 @@ final kisRealtimeServiceProvider = Provider<KisRealtimeService>((ref) {
   return service;
 });
 
+final kisRealtimeConfProvider = Provider<KisRealtimeConf>((ref) {
+  final conf = KisRealtimeConf(ref.watch(kisApiClientProvider));
+  ref.onDispose(() {
+    conf.dispose();
+  });
+  return conf;
+});
+
 final availableAccountsProvider = Provider<List<AccountProfile>>((ref) {
   return ref
       .watch(kisApiConfigProvider)
@@ -295,7 +305,7 @@ final marketIndexDetailProvider = FutureProvider.autoDispose
 final detailActionViewModelProvider = Provider<DetailActionViewModel>((ref) {
   return DetailActionViewModel(
     stockDetailRepository: ref.watch(stockDetailRepositoryProvider),
-    realtimeService: ref.watch(kisRealtimeServiceProvider),
+    realtimeConf: ref.watch(kisRealtimeConfProvider),
   );
 });
 
@@ -306,13 +316,18 @@ final stocksMarketRepositoryProvider = Provider<StocksMarketRepository>((ref) {
   );
 });
 
+final appShellViewModelProvider =
+    AutoDisposeNotifierProvider<AppShellViewModel, AppShellViewState>(
+      AppShellViewModel.new,
+    );
+
 final stocksScreenViewModelProvider =
-    NotifierProvider<StocksScreenViewModel, StocksScreenViewState>(
+    AutoDisposeNotifierProvider<StocksScreenViewModel, StocksScreenViewState>(
       StocksScreenViewModel.new,
     );
 
 final favoritesViewModelProvider =
-    NotifierProvider<FavoritesViewModel, FavoritesViewState>(
+    AutoDisposeNotifierProvider<FavoritesViewModel, FavoritesViewState>(
       FavoritesViewModel.new,
     );
 

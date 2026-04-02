@@ -1,40 +1,23 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme/app_theme.dart';
-import 'favorites_screen.dart';
-import 'home_screen.dart';
-import 'more_screen.dart';
-import 'splash_screen.dart';
-import 'stocks_screen.dart';
+import '../../providers/api_provider.dart';
+import 'favorites_view.dart';
+import 'home_view.dart';
+import 'more_view.dart';
+import 'splash_view.dart';
+import 'stocks_view.dart';
 
-class AppShell extends StatefulWidget {
+class AppShell extends ConsumerWidget {
   const AppShell({super.key});
 
   @override
-  State<AppShell> createState() => _AppShellState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(appShellViewModelProvider);
+    final viewModel = ref.read(appShellViewModelProvider.notifier);
 
-class _AppShellState extends State<AppShell> {
-  bool showSplash = true;
-  int currentIndex = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    Timer(const Duration(milliseconds: 1800), () {
-      if (mounted) {
-        setState(() {
-          showSplash = false;
-        });
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (showSplash) {
+    if (state.showSplash) {
       return const SplashScreen();
     }
 
@@ -46,10 +29,10 @@ class _AppShellState extends State<AppShell> {
     ];
 
     return Scaffold(
-      body: IndexedStack(index: currentIndex, children: screens),
+      body: IndexedStack(index: state.currentIndex, children: screens),
       bottomNavigationBar: BottomNavigationBar(
-        currentIndex: currentIndex,
-        onTap: (index) => setState(() => currentIndex = index),
+        currentIndex: state.currentIndex,
+        onTap: viewModel.updateCurrentIndex,
         selectedItemColor: AppColors.accent,
         unselectedItemColor: AppColors.textSecondary,
         backgroundColor: Theme.of(context).cardColor,

@@ -14,6 +14,8 @@ class StocksScreenViewState {
     required this.connectionState,
     required this.subscribedRealtimeKeys,
     required this.requestedLiveQuoteKeys,
+    required this.visibleRealtimeSignature,
+    required this.displayVisibleStocks,
     required this.liveDomesticPrices,
     required this.liveOverseasPrices,
     required this.liveQuoteStocks,
@@ -30,6 +32,8 @@ class StocksScreenViewState {
   final KisRealtimeConnectionState connectionState;
   final Set<String> subscribedRealtimeKeys;
   final Set<String> requestedLiveQuoteKeys;
+  final String visibleRealtimeSignature;
+  final List<RankingStock> displayVisibleStocks;
   final Map<String, RealtimeDomesticPrice> liveDomesticPrices;
   final Map<String, RealtimeOverseasPrice> liveOverseasPrices;
   final Map<String, RankingStock> liveQuoteStocks;
@@ -47,6 +51,8 @@ class StocksScreenViewState {
     KisRealtimeConnectionState? connectionState,
     Set<String>? subscribedRealtimeKeys,
     Set<String>? requestedLiveQuoteKeys,
+    String? visibleRealtimeSignature,
+    List<RankingStock>? displayVisibleStocks,
     Map<String, RealtimeDomesticPrice>? liveDomesticPrices,
     Map<String, RealtimeOverseasPrice>? liveOverseasPrices,
     Map<String, RankingStock>? liveQuoteStocks,
@@ -67,6 +73,9 @@ class StocksScreenViewState {
           subscribedRealtimeKeys ?? this.subscribedRealtimeKeys,
       requestedLiveQuoteKeys:
           requestedLiveQuoteKeys ?? this.requestedLiveQuoteKeys,
+      visibleRealtimeSignature:
+          visibleRealtimeSignature ?? this.visibleRealtimeSignature,
+      displayVisibleStocks: displayVisibleStocks ?? this.displayVisibleStocks,
       liveDomesticPrices: liveDomesticPrices ?? this.liveDomesticPrices,
       liveOverseasPrices: liveOverseasPrices ?? this.liveOverseasPrices,
       liveQuoteStocks: liveQuoteStocks ?? this.liveQuoteStocks,

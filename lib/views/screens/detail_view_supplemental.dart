@@ -1,4 +1,4 @@
-part of 'detail_screens.dart';
+part of 'detail_views.dart';
 
 class PortfolioProfitHistoryScreen extends ConsumerWidget {
   const PortfolioProfitHistoryScreen({super.key});

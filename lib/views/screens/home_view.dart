@@ -11,10 +11,10 @@ import '../../providers/api_provider.dart';
 import '../../providers/home_provider.dart';
 import '../../viewmodels/home_view_state.dart';
 import '../widgets/common_widgets.dart';
-import 'detail_screens.dart';
+import 'detail_views.dart';
 
-part 'home_screen_sections.dart';
-part 'home_screen_formatters.dart';
+part 'home_view_sections.dart';
+part 'home_view_formatters.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});

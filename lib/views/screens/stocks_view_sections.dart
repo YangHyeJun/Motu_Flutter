@@ -1,8 +1,8 @@
-part of 'stocks_screen.dart';
+part of 'stocks_view.dart';
 
 class _StocksScreenContent extends StatelessWidget {
   const _StocksScreenContent({
-    required this.searchController,
+    required this.searchQuery,
     required this.viewState,
     required this.viewModel,
     required this.stocksAsync,
@@ -12,10 +12,11 @@ class _StocksScreenContent extends StatelessWidget {
     required this.liveVisibleStocks,
     required this.displayVisibleStocks,
     required this.onDismissKeyboard,
-    required this.ownerId,
+    required this.onSearchChanged,
+    required this.onClearSearch,
   });
 
-  final TextEditingController searchController;
+  final String searchQuery;
   final StocksScreenViewState viewState;
   final StocksScreenViewModel viewModel;
   final AsyncValue<List<RankingStock>> stocksAsync;
@@ -25,7 +26,8 @@ class _StocksScreenContent extends StatelessWidget {
   final List<RankingStock> liveVisibleStocks;
   final List<RankingStock> displayVisibleStocks;
   final VoidCallback onDismissKeyboard;
-  final String ownerId;
+  final ValueChanged<String> onSearchChanged;
+  final VoidCallback onClearSearch;
 
   @override
   Widget build(BuildContext context) {
@@ -69,31 +71,12 @@ class _StocksScreenContent extends StatelessWidget {
                     horizontal: 12,
                     vertical: 10,
                   ),
-                  child: TextField(
-                    controller: searchController,
-                    onTapOutside: (_) => onDismissKeyboard(),
-                    decoration: InputDecoration(
-                      hintText: '국내/미국 종목명 또는 종목코드 검색',
-                      prefixIcon: const Icon(Icons.search),
-                      suffixIcon: trimmedSearchQuery.isEmpty
-                          ? null
-                          : IconButton(
-                              onPressed: searchController.clear,
-                              icon: const Icon(Icons.close),
-                            ),
-                      filled: true,
-                      fillColor: isDark
-                          ? AppColors.darkSurfaceSoft
-                          : const Color(0xFFF7F7F8),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
+                  child: _StocksSearchField(
+                    searchQuery: searchQuery,
+                    onSearchChanged: onSearchChanged,
+                    onClearSearch: onClearSearch,
+                    onDismissKeyboard: onDismissKeyboard,
+                    isDark: isDark,
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -104,7 +87,6 @@ class _StocksScreenContent extends StatelessWidget {
                   hasDomesticRealtimeTarget: hasDomesticRealtimeTarget,
                   hasOverseasTarget: hasOverseasTarget,
                   liveVisibleStocks: liveVisibleStocks,
-                  ownerId: ownerId,
                 ),
                 const SizedBox(height: 16),
                 if (trimmedSearchQuery.isNotEmpty)
@@ -173,6 +155,124 @@ class _StocksScreenContent extends StatelessWidget {
   }
 }
 
+class _StocksSearchField extends StatefulWidget {
+  const _StocksSearchField({
+    required this.searchQuery,
+    required this.onSearchChanged,
+    required this.onClearSearch,
+    required this.onDismissKeyboard,
+    required this.isDark,
+  });
+
+  final String searchQuery;
+  final ValueChanged<String> onSearchChanged;
+  final VoidCallback onClearSearch;
+  final VoidCallback onDismissKeyboard;
+  final bool isDark;
+
+  @override
+  State<_StocksSearchField> createState() => _StocksSearchFieldState();
+}
+
+class _StocksSearchFieldState extends State<_StocksSearchField> {
+  static const _debounceDuration = Duration(milliseconds: 250);
+
+  late final TextEditingController _controller;
+  Timer? _debounce;
+  String _lastCommittedQuery = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.searchQuery);
+    _lastCommittedQuery = widget.searchQuery;
+    _controller.addListener(_handleTextChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant _StocksSearchField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.searchQuery == widget.searchQuery) {
+      return;
+    }
+    if (widget.searchQuery == _controller.text) {
+      return;
+    }
+
+    _lastCommittedQuery = widget.searchQuery;
+    _controller
+      ..text = widget.searchQuery
+      ..selection = TextSelection.collapsed(offset: widget.searchQuery.length);
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _controller
+      ..removeListener(_handleTextChanged)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _handleTextChanged() {
+    final value = _controller.value;
+    final isComposing =
+        value.composing.isValid && !value.composing.isCollapsed;
+    if (isComposing) {
+      _debounce?.cancel();
+      return;
+    }
+
+    _debounce?.cancel();
+    final nextQuery = value.text;
+    _debounce = Timer(_debounceDuration, () {
+      if (!mounted || _lastCommittedQuery == nextQuery) {
+        return;
+      }
+      _lastCommittedQuery = nextQuery;
+      widget.onSearchChanged(nextQuery);
+    });
+  }
+
+  void _handleClear() {
+    _debounce?.cancel();
+    _lastCommittedQuery = '';
+    _controller.clear();
+    widget.onClearSearch();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final trimmedSearchQuery = widget.searchQuery.trim();
+    return TextField(
+      controller: _controller,
+      onTapOutside: (_) => widget.onDismissKeyboard(),
+      decoration: InputDecoration(
+        hintText: '국내/미국 종목명 또는 종목코드 검색',
+        prefixIcon: const Icon(Icons.search),
+        suffixIcon: trimmedSearchQuery.isEmpty
+            ? null
+            : IconButton(
+                onPressed: _handleClear,
+                icon: const Icon(Icons.close),
+              ),
+        filled: true,
+        fillColor: widget.isDark
+            ? AppColors.darkSurfaceSoft
+            : const Color(0xFFF7F7F8),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 10,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide.none,
+        ),
+      ),
+    );
+  }
+}
+
 class _StocksFilterCard extends StatelessWidget {
   const _StocksFilterCard({
     required this.viewState,
@@ -181,7 +281,6 @@ class _StocksFilterCard extends StatelessWidget {
     required this.hasDomesticRealtimeTarget,
     required this.hasOverseasTarget,
     required this.liveVisibleStocks,
-    required this.ownerId,
   });
 
   final StocksScreenViewState viewState;
@@ -190,7 +289,6 @@ class _StocksFilterCard extends StatelessWidget {
   final bool hasDomesticRealtimeTarget;
   final bool hasOverseasTarget;
   final List<RankingStock> liveVisibleStocks;
-  final String ownerId;
 
   @override
   Widget build(BuildContext context) {
@@ -282,8 +380,8 @@ class _StocksFilterCard extends StatelessWidget {
             _StocksRealtimeBanner(
               connectionState: viewState.connectionState,
               onRetry: () => viewModel.syncDisplayedStocks(
-                ownerId: ownerId,
                 visibleStocks: liveVisibleStocks,
+                exchangeRate: exchangeRate,
                 forceQuoteRefresh: true,
                 forceSubscriptionSync: true,
               ),
@@ -687,15 +785,17 @@ String _formatStockPrice(RankingStock stock) {
   final negative = stock.price < 0;
   final scale = _pow10(decimals);
   final absolute = stock.price.abs();
+  if (stock.currencySymbol == r'$') {
+    final usd = absolute / scale;
+    final amount = _trimTrailingZeros(usd.toStringAsFixed(2));
+    return '${negative ? '-' : ''}\$$amount';
+  }
   final whole = decimals == 0 ? absolute : absolute ~/ scale;
   final rawFraction = decimals == 0
       ? ''
       : (absolute % scale).toString().padLeft(decimals, '0');
-  final fraction = stock.currencySymbol == r'$'
-      ? _trimTrailingZeros(rawFraction)
-      : rawFraction;
   final numberText = _formatPrice(whole);
-  final amount = fraction.isEmpty ? numberText : '$numberText.$fraction';
+  final amount = rawFraction.isEmpty ? numberText : '$numberText.$rawFraction';
   final prefix = stock.currencySymbol == '원' ? '' : stock.currencySymbol;
   final suffix = stock.currencySymbol == '원' ? stock.currencySymbol : '';
   return '${negative ? '-' : ''}$prefix$amount$suffix';

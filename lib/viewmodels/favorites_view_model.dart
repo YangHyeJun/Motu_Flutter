@@ -8,26 +8,27 @@ import '../providers/api_provider.dart';
 import 'favorites_view_state.dart';
 import 'stocks_screen_view_model.dart';
 
-class FavoritesViewModel extends Notifier<FavoritesViewState> {
-  late final StocksScreenViewModel _stocksScreenViewModel;
+class FavoritesViewModel extends AutoDisposeNotifier<FavoritesViewState> {
+  static const _subscriptionOwnerId = 'favorites_view';
+
+  late final StocksScreenViewModel _stocksViewModel;
   StreamSubscription<KisRealtimeSnapshot>? _realtimeSubscription;
   StreamSubscription<KisRealtimeConnectionState>? _connectionSubscription;
-  Timer? _visibleQuoteRefreshTimer;
-  String? _subscriptionOwnerId;
   List<RankingStock> _visibleStocks = const <RankingStock>[];
 
   @override
   FavoritesViewState build() {
-    _stocksScreenViewModel = StocksScreenViewModel()
+    _stocksViewModel = StocksScreenViewModel()
       ..bind(
         stocksMarketRepository: ref.read(stocksMarketRepositoryProvider),
-        realtimeService: ref.read(kisRealtimeServiceProvider),
+        realtimeConf: ref.read(kisRealtimeConfProvider),
       );
     ref.onDispose(() {
       _realtimeSubscription?.cancel();
       _connectionSubscription?.cancel();
-      _visibleQuoteRefreshTimer?.cancel();
+      unawaited(clearRealtimeSubscription());
     });
+    Future<void>.microtask(_attachRealtime);
     return FavoritesViewState(
       showKrwForOverseas: false,
       lastRefreshTime: DateTime.now(),
@@ -37,27 +38,23 @@ class FavoritesViewModel extends Notifier<FavoritesViewState> {
       ),
       subscribedRealtimeKeys: const <String>{},
       requestedLiveQuoteKeys: const <String>{},
+      visibleRealtimeSignature: '',
       liveDomesticPrices: const <String, RealtimeDomesticPrice>{},
       liveOverseasPrices: const <String, RealtimeOverseasPrice>{},
       liveQuoteStocks: const <String, RankingStock>{},
     );
   }
 
-  void attachRealtime(String ownerId) {
-    if (_subscriptionOwnerId == ownerId) {
+  void _attachRealtime() {
+    if (_realtimeSubscription != null) {
       return;
     }
 
-    _subscriptionOwnerId = ownerId;
-    final realtimeService = ref.read(kisRealtimeServiceProvider);
-    applyRealtimeSnapshot(realtimeService.snapshot);
-    updateConnectionState(realtimeService.connectionState);
-    _realtimeSubscription?.cancel();
-    _connectionSubscription?.cancel();
-    _visibleQuoteRefreshTimer?.cancel();
-
-    _realtimeSubscription = realtimeService.stream.listen(applyRealtimeSnapshot);
-    _connectionSubscription = realtimeService.connectionStateStream.listen((
+    final realtimeConf = ref.read(kisRealtimeConfProvider);
+    applyRealtimeSnapshot(realtimeConf.snapshot);
+    updateConnectionState(realtimeConf.connectionState);
+    _realtimeSubscription = realtimeConf.stream.listen(applyRealtimeSnapshot);
+    _connectionSubscription = realtimeConf.connectionStateStream.listen((
       nextState,
     ) {
       final previousStatus = state.connectionState.status;
@@ -66,72 +63,22 @@ class FavoritesViewModel extends Notifier<FavoritesViewState> {
           previousStatus != KisRealtimeConnectionStatus.connected &&
           _visibleStocks.isNotEmpty) {
         unawaited(
-          handleVisibleStocksChanged(
-            ownerId: ownerId,
+          _handleVisibleStocksChanged(
             visibleStocks: _visibleStocks,
-            forceQuoteRefresh: true,
             forceSubscriptionSync: true,
           ),
         );
       }
     });
-    _visibleQuoteRefreshTimer = Timer.periodic(const Duration(seconds: 4), (_) {
-      if (_visibleStocks.isEmpty || _subscriptionOwnerId != ownerId) {
-        return;
-      }
-      final connectionStatus = state.connectionState.status;
-      unawaited(
-        handleVisibleStocksChanged(
-          ownerId: ownerId,
-          visibleStocks: _visibleStocks,
-          forceQuoteRefresh: true,
-          forceSubscriptionSync:
-              connectionStatus != KisRealtimeConnectionStatus.connected,
-        ),
-      );
-    });
-  }
-
-  Future<void> detachRealtime() async {
-    final ownerId = _subscriptionOwnerId;
-    _subscriptionOwnerId = null;
-    _visibleStocks = const <RankingStock>[];
-    _realtimeSubscription?.cancel();
-    _realtimeSubscription = null;
-    _connectionSubscription?.cancel();
-    _connectionSubscription = null;
-    _visibleQuoteRefreshTimer?.cancel();
-    _visibleQuoteRefreshTimer = null;
-    if (ownerId != null) {
-      await syncRealtimeSubscription(ownerId: ownerId, visibleStocks: const []);
-    }
-  }
-
-  Future<void> syncDisplayedStocks({
-    required String ownerId,
-    required List<RankingStock> visibleStocks,
-    bool forceQuoteRefresh = false,
-    bool forceSubscriptionSync = false,
-  }) {
-    _visibleStocks = visibleStocks;
-    return handleVisibleStocksChanged(
-      ownerId: ownerId,
-      visibleStocks: visibleStocks,
-      forceQuoteRefresh: forceQuoteRefresh,
-      forceSubscriptionSync: forceSubscriptionSync,
-    );
   }
 
   Future<void> handleAppResumed(List<RankingStock> visibleStocks) async {
-    final ownerId = _subscriptionOwnerId;
-    if (ownerId == null || visibleStocks.isEmpty) {
+    if (visibleStocks.isEmpty) {
       return;
     }
     _visibleStocks = visibleStocks;
-    await handleVisibleStocksChanged(
-      ownerId: ownerId,
+    await _handleVisibleStocksChanged(
       visibleStocks: visibleStocks,
-      forceQuoteRefresh: true,
       forceSubscriptionSync: true,
     );
   }
@@ -169,8 +116,27 @@ class FavoritesViewModel extends Notifier<FavoritesViewState> {
     }
   }
 
-  Future<void> handleVisibleStocksChanged({
-    required String ownerId,
+  Future<void> syncDisplayedStocks({
+    required List<RankingStock> visibleStocks,
+    bool forceQuoteRefresh = false,
+    bool forceSubscriptionSync = false,
+  }) async {
+    final nextSignature = visibleStocks.map(stockKey).join('|');
+    if (!forceSubscriptionSync &&
+        state.visibleRealtimeSignature == nextSignature) {
+      return;
+    }
+
+    _visibleStocks = visibleStocks;
+    state = state.copyWith(visibleRealtimeSignature: nextSignature);
+    await _handleVisibleStocksChanged(
+      visibleStocks: visibleStocks,
+      forceQuoteRefresh: forceQuoteRefresh,
+      forceSubscriptionSync: forceSubscriptionSync,
+    );
+  }
+
+  Future<void> _handleVisibleStocksChanged({
     required List<RankingStock> visibleStocks,
     bool forceQuoteRefresh = false,
     bool forceSubscriptionSync = false,
@@ -179,10 +145,7 @@ class FavoritesViewModel extends Notifier<FavoritesViewState> {
     if (forceSubscriptionSync ||
         !sameCodes(state.subscribedRealtimeKeys, realtimeKeys)) {
       state = state.copyWith(subscribedRealtimeKeys: realtimeKeys);
-      await syncRealtimeSubscription(
-        ownerId: ownerId,
-        visibleStocks: visibleStocks,
-      );
+      await syncRealtimeSubscription(visibleStocks: visibleStocks);
     }
 
     await refreshFavoriteQuotes(visibleStocks, forceRefresh: forceQuoteRefresh);
@@ -194,7 +157,7 @@ class FavoritesViewModel extends Notifier<FavoritesViewState> {
     required Map<String, RealtimeOverseasPrice> liveOverseasPrices,
     required Map<String, RankingStock> liveQuoteStocks,
   }) {
-    return _stocksScreenViewModel.applyRealtimeStocks(
+    return _stocksViewModel.applyRealtimeStocks(
       stocks,
       liveDomesticPrices: liveDomesticPrices,
       liveOverseasPrices: liveOverseasPrices,
@@ -207,7 +170,7 @@ class FavoritesViewModel extends Notifier<FavoritesViewState> {
     required bool showKrwForOverseas,
     required double? exchangeRate,
   }) {
-    return _stocksScreenViewModel.applyDisplayCurrency(
+    return _stocksViewModel.applyDisplayCurrency(
       stocks,
       showKrwForOverseas: showKrwForOverseas,
       exchangeRate: exchangeRate,
@@ -227,14 +190,13 @@ class FavoritesViewModel extends Notifier<FavoritesViewState> {
     if (visibleStocks.isEmpty) {
       state = state.copyWith(
         liveQuoteStocks: const <String, RankingStock>{},
+        visibleRealtimeSignature: '',
         lastRefreshTime: DateTime.now(),
       );
       return;
     }
 
-    final liveQuotes = await _stocksScreenViewModel.refreshVisibleQuotes(
-      visibleStocks,
-    );
+    final liveQuotes = await _stocksViewModel.refreshVisibleQuotes(visibleStocks);
     state = state.copyWith(
       liveQuoteStocks: Map<String, RankingStock>.from(liveQuotes),
       lastRefreshTime: DateTime.now(),
@@ -247,20 +209,67 @@ class FavoritesViewModel extends Notifier<FavoritesViewState> {
   }
 
   Future<void> syncRealtimeSubscription({
-    required String ownerId,
     required List<RankingStock> visibleStocks,
-  }) {
-    return _stocksScreenViewModel.syncRealtimeSubscription(
-      ownerId: ownerId,
-      visibleStocks: visibleStocks,
+  }) async {
+    final domesticCodes = visibleStocks
+        .where((stock) => stock.marketType == StockMarketType.domestic)
+        .map((stock) => stock.code);
+    final overseasTargets = visibleStocks
+        .where((stock) => stock.marketType == StockMarketType.overseas)
+        .map(
+          (stock) => OverseasRealtimeTarget(
+            code: stock.code,
+            exchangeCode: _normalizeOverseasExchangeCode(stock.exchangeCode),
+          ),
+        )
+        .toList(growable: false);
+
+    final realtimeConf = ref.read(kisRealtimeConfProvider);
+    if (domesticCodes.isEmpty && overseasTargets.isEmpty) {
+      await realtimeConf.clearSubscription(_subscriptionOwnerId);
+      return;
+    }
+
+    await realtimeConf.setSubscription(
+      ownerId: _subscriptionOwnerId,
+      domesticCodes: domesticCodes,
+      overseasTargets: overseasTargets,
+      includeKospi: false,
+    );
+  }
+
+  Future<void> clearRealtimeSubscription() {
+    state = state.copyWith(
+      subscribedRealtimeKeys: const <String>{},
+      requestedLiveQuoteKeys: const <String>{},
+      visibleRealtimeSignature: '',
+    );
+    return ref.read(kisRealtimeConfProvider).clearSubscription(
+      _subscriptionOwnerId,
     );
   }
 
   bool sameCodes(Set<String> current, Set<String> next) {
-    return _stocksScreenViewModel.sameCodes(current, next);
+    return _stocksViewModel.sameCodes(current, next);
   }
 
   String stockKey(RankingStock stock) {
-    return _stocksScreenViewModel.stockKey(stock);
+    return _stocksViewModel.stockKey(stock);
+  }
+
+  String _normalizeOverseasExchangeCode(String? exchangeCode) {
+    switch ((exchangeCode ?? 'NAS').trim().toUpperCase()) {
+      case 'NASD':
+      case 'BAQ':
+        return 'NAS';
+      case 'NYSE':
+      case 'BAY':
+        return 'NYS';
+      case 'AMEX':
+      case 'BAA':
+        return 'AMS';
+      default:
+        return (exchangeCode ?? 'NAS').trim().toUpperCase();
+    }
   }
 }

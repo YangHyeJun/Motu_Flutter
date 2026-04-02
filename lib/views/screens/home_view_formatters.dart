@@ -1,4 +1,4 @@
-part of 'home_screen.dart';
+part of 'home_view.dart';
 
 String _format(int value) {
   final digits = value.toString();

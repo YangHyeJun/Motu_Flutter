@@ -1,23 +1,25 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/market/market_session.dart';
 import '../../core/network/kis_api_exception.dart';
+import '../../core/network/kis_realtime_conf.dart';
 import '../../core/network/kis_realtime_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/models.dart';
 import '../../providers/api_provider.dart';
 import '../../providers/home_provider.dart';
 import '../../viewmodels/detail_action_view_model.dart';
-import 'more_screen.dart';
+import 'more_view.dart';
 import '../widgets/chart_widgets.dart';
 import '../widgets/common_widgets.dart';
 
-part 'detail_screen_supplemental.dart';
-part 'detail_screen_shared.dart';
+part 'detail_view_supplemental.dart';
+part 'detail_view_shared.dart';
 
 enum _OverseasDisplayCurrency { usd, krw }
 
@@ -242,7 +244,7 @@ class _MarketIndexDetailScreenState
   _OverseasDisplayCurrency _displayCurrency = _OverseasDisplayCurrency.usd;
   final String _subscriptionOwnerId =
       'market_index_detail_${identityHashCode(Object())}';
-  late final KisRealtimeService _realtimeService;
+  late final KisRealtimeConf _realtimeConf;
   StreamSubscription<KisRealtimeSnapshot>? _realtimeSubscription;
   StreamSubscription<KisRealtimeConnectionState>? _connectionSubscription;
   int? _realtimeValue;
@@ -255,13 +257,13 @@ class _MarketIndexDetailScreenState
   @override
   void initState() {
     super.initState();
-    _realtimeService = ref.read(kisRealtimeServiceProvider);
-    _connectionState = _realtimeService.connectionState;
-    _handleRealtimeSnapshot(_realtimeService.snapshot);
-    _realtimeSubscription = _realtimeService.stream.listen(
+    _realtimeConf = ref.read(kisRealtimeConfProvider);
+    _connectionState = _realtimeConf.connectionState;
+    _handleRealtimeSnapshot(_realtimeConf.snapshot);
+    _realtimeSubscription = _realtimeConf.stream.listen(
       _handleRealtimeSnapshot,
     );
-    _connectionSubscription = _realtimeService.connectionStateStream.listen((
+    _connectionSubscription = _realtimeConf.connectionStateStream.listen((
       state,
     ) {
       if (!mounted) {
@@ -278,7 +280,7 @@ class _MarketIndexDetailScreenState
   void dispose() {
     _realtimeSubscription?.cancel();
     _connectionSubscription?.cancel();
-    unawaited(_realtimeService.clearSubscription(_subscriptionOwnerId));
+    unawaited(_realtimeConf.clearSubscription(_subscriptionOwnerId));
     super.dispose();
   }
 
@@ -606,10 +608,13 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen>
   _OverseasDisplayCurrency _displayCurrency = _OverseasDisplayCurrency.usd;
   final String _subscriptionOwnerId =
       'stock_detail_${identityHashCode(Object())}';
-  late final KisRealtimeService _realtimeService;
+  late final KisRealtimeConf _realtimeConf;
   StreamSubscription<KisRealtimeSnapshot>? _realtimeSubscription;
   StreamSubscription<KisRealtimeConnectionState>? _connectionSubscription;
+  KisRealtimeSnapshot? _pendingRealtimeSnapshot;
+  bool _isRefreshingDetail = false;
   int? _realtimePrice;
+  int? _realtimePriceDecimals;
   double? _realtimeRate;
   int? _realtimeVolume;
   int? _realtimeOpenPrice;
@@ -626,21 +631,26 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _realtimeService = ref.read(kisRealtimeServiceProvider);
-    _connectionState = _realtimeService.connectionState;
-    _handleRealtimeSnapshot(_realtimeService.snapshot);
-    _realtimeSubscription = _realtimeService.stream.listen(
+    _realtimeConf = ref.read(kisRealtimeConfProvider);
+    _connectionState = _realtimeConf.connectionState;
+    _handleRealtimeSnapshot(_realtimeConf.snapshot);
+    _realtimeSubscription = _realtimeConf.stream.listen(
       _handleRealtimeSnapshot,
     );
-    _connectionSubscription = _realtimeService.connectionStateStream.listen((
+    _connectionSubscription = _realtimeConf.connectionStateStream.listen((
       state,
     ) {
       if (!mounted) {
         return;
       }
+      final previousStatus = _connectionState.status;
       setState(() {
         _connectionState = state;
       });
+      if (state.status == KisRealtimeConnectionStatus.connected &&
+          previousStatus != KisRealtimeConnectionStatus.connected) {
+        unawaited(_syncRealtimeSubscription());
+      }
     });
     _configureLiveUpdates();
   }
@@ -650,7 +660,7 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen>
     WidgetsBinding.instance.removeObserver(this);
     _realtimeSubscription?.cancel();
     _connectionSubscription?.cancel();
-    unawaited(_realtimeService.clearSubscription(_subscriptionOwnerId));
+    unawaited(_realtimeConf.clearSubscription(_subscriptionOwnerId));
     super.dispose();
   }
 
@@ -726,9 +736,12 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen>
           );
     final compareLabel = effectiveAveragePrice == null ? '전일 대비 ' : '내 평균 대비 ';
     final baseCompareAmount = effectiveAveragePrice == null
-        ? (basePrice * (displayRate.abs() / 100)).round()
+        ? (detail?.previousClosePrice != null && detail!.previousClosePrice > 0
+              ? (basePrice - detail.previousClosePrice).abs()
+              : (basePrice * (displayRate.abs() / 100)).round())
         : (basePrice - effectiveAveragePrice).abs();
-    final basePriceDecimals = detail?.priceDecimals ?? widget.priceDecimals;
+    final basePriceDecimals =
+        _realtimePriceDecimals ?? detail?.priceDecimals ?? widget.priceDecimals;
     final baseCurrencySymbol = detail?.currencySymbol ?? widget.currencySymbol;
     final favoriteStock = FavoriteStock(
       name: widget.name,
@@ -776,10 +789,20 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen>
         : baseChartEntries;
     final chartReferencePrice = chartEntries.isEmpty
         ? null
-        : _referencePriceFromChangeRate(
-            currentPrice: chartEntries.last.closePrice,
-            changeRate: displayRate,
-          );
+        : (effectiveAveragePrice == null &&
+                  detail?.previousClosePrice != null &&
+                  detail!.previousClosePrice > 0
+              ? (useKrw
+                    ? _convertForeignPriceToKrw(
+                        detail.previousClosePrice,
+                        decimals: basePriceDecimals,
+                        exchangeRate: exchangeRate,
+                      )
+                    : detail.previousClosePrice)
+              : _referencePriceFromChangeRate(
+                  currentPrice: chartEntries.last.closePrice,
+                  changeRate: displayRate,
+                ));
     final range = _chartRange(chartEntries);
     final displayVolume = baseVolume;
     final displayOpenPrice = useKrw
@@ -825,16 +848,10 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen>
               : detail?.orderBook ?? const <StockOrderBookLevel>[]);
 
     Future<void> refreshDetail() async {
-      setState(() {
-        _realtimePrice = null;
-        _realtimeRate = null;
-        _realtimeVolume = null;
-        _realtimeOpenPrice = null;
-        _realtimeHighPrice = null;
-        _realtimeLowPrice = null;
-        _realtimeExchangeRate = null;
-        _liveOrderBook = const <StockOrderBookLevel>[];
-      });
+      if (_isRefreshingDetail) {
+        return;
+      }
+      _isRefreshingDetail = true;
       await ref
           .read(detailActionViewModelProvider)
           .refreshStockDetail(
@@ -844,6 +861,14 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen>
             },
           );
       _configureLiveUpdates();
+      _isRefreshingDetail = false;
+      final pendingSnapshot = _pendingRealtimeSnapshot;
+      _pendingRealtimeSnapshot = null;
+      if (pendingSnapshot != null) {
+        _applyRealtimeSnapshot(pendingSnapshot);
+      } else {
+        _applyRealtimeSnapshot(_realtimeConf.snapshot);
+      }
     }
 
     return Scaffold(
@@ -870,42 +895,39 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen>
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: refreshDetail,
-          child: SingleChildScrollView(
+          child: ListView(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                minHeight: MediaQuery.of(context).size.height - 120,
-              ),
-              child: IntrinsicHeight(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '${widget.name} (${widget.code})',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    if (isOverseas) ...[
-                      const SizedBox(height: 12),
-                      _OverseasCurrencyToggle(
-                        selected: _displayCurrency,
-                        exchangeRate: exchangeRate,
-                        onSelected: (value) {
-                          setState(() {
-                            _displayCurrency = value;
-                          });
-                        },
-                      ),
-                      if (exchangeRate != null && exchangeRate > 0) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          '적용 환율 1달러 = ${_currency(exchangeRate.round())}원',
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: AppColors.textSecondary),
-                        ),
-                      ],
-                    ],
+            children: [
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '${widget.name} (${widget.code})',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                if (isOverseas) ...[
+                  const SizedBox(height: 12),
+                  _OverseasCurrencyToggle(
+                    selected: _displayCurrency,
+                    exchangeRate: exchangeRate,
+                    onSelected: (value) {
+                      setState(() {
+                        _displayCurrency = value;
+                      });
+                    },
+                  ),
+                  if (exchangeRate != null && exchangeRate > 0) ...[
                     const SizedBox(height: 8),
+                    Text(
+                      '적용 환율 1달러 = ${_currency(exchangeRate.round())}원',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ],
+                const SizedBox(height: 8),
                     Text(
                       _formatMoney(
                         displayPrice,
@@ -1020,6 +1042,7 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen>
                         setState(() {
                           _selectedPeriod = period;
                           _realtimePrice = null;
+                          _realtimePriceDecimals = null;
                           _realtimeRate = null;
                           _realtimeVolume = null;
                           _realtimeOpenPrice = null;
@@ -1081,7 +1104,6 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen>
                       const SizedBox(height: 18),
                       _InfoGridCard(items: detail.infoItems),
                     ],
-                    const Spacer(),
                     const SizedBox(height: 18),
                     if (isOverseas)
                       SizedBox(
@@ -1186,10 +1208,7 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen>
                           ),
                         ],
                       ),
-                  ],
-                ),
-              ),
-            ),
+              ],
           ),
         ),
       ),
@@ -1223,6 +1242,14 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen>
   }
 
   void _handleRealtimeSnapshot(KisRealtimeSnapshot snapshot) {
+    if (_isRefreshingDetail) {
+      _pendingRealtimeSnapshot = snapshot;
+      return;
+    }
+    _applyRealtimeSnapshot(snapshot);
+  }
+
+  void _applyRealtimeSnapshot(KisRealtimeSnapshot snapshot) {
     if (!mounted || _selectedPeriod != StockChartPeriod.oneDay) {
       return;
     }
@@ -1236,6 +1263,14 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen>
 
       setState(() {
         if (realtime != null) {
+          if (kDebugMode &&
+              (_realtimePrice != realtime.currentPrice ||
+                  _realtimeVolume != realtime.volume)) {
+            debugPrint(
+              '[Detail][Domestic] code=${widget.code} price=${realtime.currentPrice} '
+              'volume=${realtime.volume} prevPrice=$_realtimePrice prevVolume=$_realtimeVolume',
+            );
+          }
           _realtimePrice = realtime.currentPrice;
           _realtimeRate = realtime.changeRate;
           _realtimeVolume = realtime.volume;
@@ -1251,7 +1286,7 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen>
     }
 
     final overseasKey =
-        '${(widget.exchangeCode ?? 'NAS').toUpperCase()}:${widget.code.toUpperCase()}';
+        '${_normalizeOverseasRealtimeExchangeCode(widget.exchangeCode)}:${widget.code.toUpperCase()}';
     final realtime = snapshot.overseasStockPrices[overseasKey];
     final orderBook = snapshot.orderBooks['overseas:$overseasKey'];
     if (realtime == null && orderBook == null) {
@@ -1260,7 +1295,17 @@ class _StockDetailScreenState extends ConsumerState<StockDetailScreen>
 
     setState(() {
       if (realtime != null) {
+        if (kDebugMode &&
+            (_realtimePrice != realtime.currentPrice ||
+                _realtimeVolume != realtime.volume)) {
+          debugPrint(
+            '[Detail][Overseas] code=${widget.code} exchange=${widget.exchangeCode} '
+            'price=${realtime.currentPrice} decimals=${realtime.priceDecimals} '
+            'volume=${realtime.volume} prevPrice=$_realtimePrice prevVolume=$_realtimeVolume',
+          );
+        }
         _realtimePrice = realtime.currentPrice;
+        _realtimePriceDecimals = realtime.priceDecimals;
         _realtimeRate = realtime.changeRate;
         _realtimeVolume = realtime.volume;
         _realtimeOpenPrice = realtime.openPrice;
@@ -1293,6 +1338,22 @@ String _favoriteMarketLabel({
     case 'BAQ':
     default:
       return '미국 · 나스닥';
+  }
+}
+
+String _normalizeOverseasRealtimeExchangeCode(String? exchangeCode) {
+  switch ((exchangeCode ?? 'NAS').trim().toUpperCase()) {
+    case 'NASD':
+    case 'BAQ':
+      return 'NAS';
+    case 'NYSE':
+    case 'BAY':
+      return 'NYS';
+    case 'AMEX':
+    case 'BAA':
+      return 'AMS';
+    default:
+      return (exchangeCode ?? 'NAS').trim().toUpperCase();
   }
 }
 
@@ -1485,7 +1546,7 @@ class _TradeOrderScreen extends ConsumerStatefulWidget {
 class _TradeOrderScreenState extends ConsumerState<_TradeOrderScreen> {
   final String _subscriptionOwnerId =
       'trade_order_${identityHashCode(Object())}';
-  late final KisRealtimeService _realtimeService;
+  late final KisRealtimeConf _realtimeConf;
   late final TextEditingController _quantityController;
   StreamSubscription<KisRealtimeSnapshot>? _realtimeSubscription;
   StreamSubscription<KisRealtimeConnectionState>? _connectionSubscription;
@@ -1512,13 +1573,13 @@ class _TradeOrderScreenState extends ConsumerState<_TradeOrderScreen> {
         setState(() {});
       }
     });
-    _realtimeService = ref.read(kisRealtimeServiceProvider);
-    _connectionState = _realtimeService.connectionState;
-    _handleRealtimeSnapshot(_realtimeService.snapshot);
-    _realtimeSubscription = _realtimeService.stream.listen(
+    _realtimeConf = ref.read(kisRealtimeConfProvider);
+    _connectionState = _realtimeConf.connectionState;
+    _handleRealtimeSnapshot(_realtimeConf.snapshot);
+    _realtimeSubscription = _realtimeConf.stream.listen(
       _handleRealtimeSnapshot,
     );
-    _connectionSubscription = _realtimeService.connectionStateStream.listen((
+    _connectionSubscription = _realtimeConf.connectionStateStream.listen((
       state,
     ) {
       if (!mounted) {
@@ -1548,7 +1609,7 @@ class _TradeOrderScreenState extends ConsumerState<_TradeOrderScreen> {
     _quantityController.dispose();
     _realtimeSubscription?.cancel();
     _connectionSubscription?.cancel();
-    unawaited(_realtimeService.clearSubscription(_subscriptionOwnerId));
+    unawaited(_realtimeConf.clearSubscription(_subscriptionOwnerId));
     super.dispose();
   }
 
@@ -1588,12 +1649,21 @@ class _TradeOrderScreenState extends ConsumerState<_TradeOrderScreen> {
     final totalAmount = quantity > 0 && selectedPrice > 0
         ? quantity * selectedPrice
         : 0;
+    final hasValidOrderBookPrice =
+        orderBook.isNotEmpty && orderBook.any((level) {
+          final candidate = widget.mode == _TradeMode.buy
+              ? level.askPrice
+              : level.bidPrice;
+          return candidate == selectedPrice && candidate > 0;
+        });
     final canSubmit =
         !_isSubmitting &&
         detail != null &&
         quantity > 0 &&
         maxQuantity > 0 &&
-        quantity <= maxQuantity;
+        quantity <= maxQuantity &&
+        selectedPrice > 0 &&
+        hasValidOrderBookPrice;
 
     return Scaffold(
       appBar: AppBar(
@@ -1974,6 +2044,32 @@ class _TradeOrderScreenState extends ConsumerState<_TradeOrderScreen> {
   }
 
   Future<void> _submitOrder(int quantity, int price) async {
+    final orderBook = _liveOrderBook.isNotEmpty
+        ? _liveOrderBook
+        : ref
+              .read(
+                stockDetailProvider((
+                  code: widget.stockCode,
+                  name: widget.stockName,
+                  period: StockChartPeriod.oneDay,
+                  marketType: StockMarketType.domestic,
+                  exchangeCode: null,
+                )),
+              )
+              .valueOrNull
+              ?.orderBook ??
+          const <StockOrderBookLevel>[];
+    final hasValidOrderBookPrice = orderBook.any((level) {
+      final candidate = widget.mode == _TradeMode.buy
+          ? level.askPrice
+          : level.bidPrice;
+      return candidate == price && candidate > 0;
+    });
+    if (!hasValidOrderBookPrice) {
+      _showQuantityToast('실시간 호가를 확인한 뒤 다시 주문해주세요.');
+      return;
+    }
+
     _dismissKeyboard();
     setState(() {
       _isSubmitting = true;

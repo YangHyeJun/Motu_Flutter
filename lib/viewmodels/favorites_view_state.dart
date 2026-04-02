@@ -9,6 +9,7 @@ class FavoritesViewState {
     required this.connectionState,
     required this.subscribedRealtimeKeys,
     required this.requestedLiveQuoteKeys,
+    required this.visibleRealtimeSignature,
     required this.liveDomesticPrices,
     required this.liveOverseasPrices,
     required this.liveQuoteStocks,
@@ -20,6 +21,7 @@ class FavoritesViewState {
   final KisRealtimeConnectionState connectionState;
   final Set<String> subscribedRealtimeKeys;
   final Set<String> requestedLiveQuoteKeys;
+  final String visibleRealtimeSignature;
   final Map<String, RealtimeDomesticPrice> liveDomesticPrices;
   final Map<String, RealtimeOverseasPrice> liveOverseasPrices;
   final Map<String, RankingStock> liveQuoteStocks;
@@ -32,6 +34,7 @@ class FavoritesViewState {
     KisRealtimeConnectionState? connectionState,
     Set<String>? subscribedRealtimeKeys,
     Set<String>? requestedLiveQuoteKeys,
+    String? visibleRealtimeSignature,
     Map<String, RealtimeDomesticPrice>? liveDomesticPrices,
     Map<String, RealtimeOverseasPrice>? liveOverseasPrices,
     Map<String, RankingStock>? liveQuoteStocks,
@@ -47,6 +50,8 @@ class FavoritesViewState {
           subscribedRealtimeKeys ?? this.subscribedRealtimeKeys,
       requestedLiveQuoteKeys:
           requestedLiveQuoteKeys ?? this.requestedLiveQuoteKeys,
+      visibleRealtimeSignature:
+          visibleRealtimeSignature ?? this.visibleRealtimeSignature,
       liveDomesticPrices: liveDomesticPrices ?? this.liveDomesticPrices,
       liveOverseasPrices: liveOverseasPrices ?? this.liveOverseasPrices,
       liveQuoteStocks: liveQuoteStocks ?? this.liveQuoteStocks,

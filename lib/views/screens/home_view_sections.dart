@@ -1,4 +1,4 @@
-part of 'home_screen.dart';
+part of 'home_view.dart';
 
 class _MarketTickerEntry {
   const _MarketTickerEntry({

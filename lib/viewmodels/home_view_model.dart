@@ -22,13 +22,13 @@ class HomeViewModel extends Notifier<HomeViewState> {
   HomeViewState build() {
     ref.watch(selectedAccountProvider);
     _isDisposed = false;
-    final realtimeService = ref.read(kisRealtimeServiceProvider);
+    final realtimeConf = ref.read(kisRealtimeConfProvider);
     ref.onDispose(() {
       _isDisposed = true;
       _deferredRefreshToken++;
       _realtimeSubscription?.cancel();
       _marketRefreshTimer?.cancel();
-      unawaited(realtimeService.clearSubscription(_subscriptionOwnerId));
+      unawaited(realtimeConf.clearSubscription(_subscriptionOwnerId));
     });
     final initialState = _buildInitialState();
     if (!_didScheduleInitialLoad) {
@@ -500,9 +500,9 @@ class HomeViewModel extends Notifier<HomeViewState> {
       return;
     }
 
-    final realtimeService = ref.read(kisRealtimeServiceProvider);
-    _applyRealtimeSnapshot(realtimeService.snapshot);
-    _realtimeSubscription = realtimeService.stream.listen(
+    final realtimeConf = ref.read(kisRealtimeConfProvider);
+    _applyRealtimeSnapshot(realtimeConf.snapshot);
+    _realtimeSubscription = realtimeConf.stream.listen(
       _applyRealtimeSnapshot,
     );
   }
@@ -546,8 +546,8 @@ class HomeViewModel extends Notifier<HomeViewState> {
   }
 
   Future<void> _syncRealtimeSubscription() async {
-    final realtimeService = ref.read(kisRealtimeServiceProvider);
-    await realtimeService.setSubscription(
+    final realtimeConf = ref.read(kisRealtimeConfProvider);
+    await realtimeConf.setSubscription(
       ownerId: _subscriptionOwnerId,
       domesticCodes: state.domesticHoldings.map((holding) => holding.code),
       overseasTargets: state.usHoldings.map(

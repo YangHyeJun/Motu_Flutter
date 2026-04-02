@@ -1,4 +1,4 @@
-part of 'detail_screens.dart';
+part of 'detail_views.dart';
 
 class _QuantityStepButton extends StatelessWidget {
   const _QuantityStepButton({required this.icon, required this.onTap});
@@ -942,15 +942,17 @@ String _formatMoney(
   final negative = value < 0;
   final scale = _pow10(decimals);
   final absolute = value.abs();
+  if (currencySymbol == r'$') {
+    final usd = absolute / scale;
+    final amount = _trimTrailingZeros(usd.toStringAsFixed(2));
+    return '${negative ? '-' : ''}\$$amount';
+  }
   final whole = decimals == 0 ? absolute : absolute ~/ scale;
   final rawFraction = decimals == 0
       ? ''
       : (absolute % scale).toString().padLeft(decimals, '0');
-  final fraction = currencySymbol == r'$'
-      ? _trimTrailingZeros(rawFraction)
-      : rawFraction;
   final numberText = _formatNumber(whole);
-  final amount = fraction.isEmpty ? numberText : '$numberText.$fraction';
+  final amount = rawFraction.isEmpty ? numberText : '$numberText.$rawFraction';
   final prefix = currencySymbol == '원' ? '' : currencySymbol;
   final suffix = currencySymbol == '원' ? currencySymbol : '';
   return '${negative ? '-' : ''}$prefix$amount$suffix';

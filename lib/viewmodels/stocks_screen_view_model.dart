@@ -2,42 +2,44 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/network/kis_realtime_conf.dart';
 import '../core/network/kis_realtime_service.dart';
 import '../models/models.dart';
 import '../providers/api_provider.dart';
 import '../repositories/stocks_market_repository.dart';
 import 'stocks_screen_view_state.dart';
 
-class StocksScreenViewModel extends Notifier<StocksScreenViewState> {
+class StocksScreenViewModel extends AutoDisposeNotifier<StocksScreenViewState> {
   static const pageSize = 30;
+  static const _subscriptionOwnerId = 'stocks_view';
 
   late final StocksMarketRepository _stocksMarketRepository;
-  late final KisRealtimeService _realtimeService;
+  late final KisRealtimeConf _realtimeConf;
   StreamSubscription<KisRealtimeSnapshot>? _realtimeSubscription;
   StreamSubscription<KisRealtimeConnectionState>? _connectionSubscription;
-  Timer? _visibleQuoteRefreshTimer;
-  String? _subscriptionOwnerId;
+  double? _currentExchangeRate;
   List<RankingStock> _visibleStocks = const <RankingStock>[];
 
   void bind({
     required StocksMarketRepository stocksMarketRepository,
-    required KisRealtimeService realtimeService,
+    required KisRealtimeConf realtimeConf,
   }) {
     _stocksMarketRepository = stocksMarketRepository;
-    _realtimeService = realtimeService;
+    _realtimeConf = realtimeConf;
   }
 
   @override
   StocksScreenViewState build() {
     bind(
       stocksMarketRepository: ref.read(stocksMarketRepositoryProvider),
-      realtimeService: ref.read(kisRealtimeServiceProvider),
+      realtimeConf: ref.read(kisRealtimeConfProvider),
     );
     ref.onDispose(() {
       _realtimeSubscription?.cancel();
       _connectionSubscription?.cancel();
-      _visibleQuoteRefreshTimer?.cancel();
+      unawaited(clearRealtimeSubscription());
     });
+    Future<void>.microtask(_attachRealtime);
     return StocksScreenViewState(
       selectedMarket: 'domestic',
       selectedCategory: 'tradeAmount',
@@ -52,28 +54,23 @@ class StocksScreenViewModel extends Notifier<StocksScreenViewState> {
       ),
       subscribedRealtimeKeys: const <String>{},
       requestedLiveQuoteKeys: const <String>{},
+      visibleRealtimeSignature: '',
+      displayVisibleStocks: const <RankingStock>[],
       liveDomesticPrices: const <String, RealtimeDomesticPrice>{},
       liveOverseasPrices: const <String, RealtimeOverseasPrice>{},
       liveQuoteStocks: const <String, RankingStock>{},
     );
   }
 
-  void attachRealtime(String ownerId) {
-    if (_subscriptionOwnerId == ownerId) {
+  void _attachRealtime() {
+    if (_realtimeSubscription != null) {
       return;
     }
 
-    _subscriptionOwnerId = ownerId;
-    applyRealtimeSnapshot(_realtimeService.snapshot);
-    updateConnectionState(_realtimeService.connectionState);
-    _realtimeSubscription?.cancel();
-    _connectionSubscription?.cancel();
-    _visibleQuoteRefreshTimer?.cancel();
-
-    _realtimeSubscription = _realtimeService.stream.listen(
-      applyRealtimeSnapshot,
-    );
-    _connectionSubscription = _realtimeService.connectionStateStream.listen((
+    applyRealtimeSnapshot(_realtimeConf.snapshot);
+    updateConnectionState(_realtimeConf.connectionState);
+    _realtimeSubscription = _realtimeConf.stream.listen(applyRealtimeSnapshot);
+    _connectionSubscription = _realtimeConf.connectionStateStream.listen((
       nextState,
     ) {
       final previousStatus = state.connectionState.status;
@@ -82,71 +79,21 @@ class StocksScreenViewModel extends Notifier<StocksScreenViewState> {
           previousStatus != KisRealtimeConnectionStatus.connected &&
           _visibleStocks.isNotEmpty) {
         unawaited(
-          handleVisibleStocksChanged(
-            ownerId: ownerId,
+          _handleVisibleStocksChanged(
             visibleStocks: _visibleStocks,
-            forceQuoteRefresh: true,
             forceSubscriptionSync: true,
           ),
         );
       }
     });
-    _visibleQuoteRefreshTimer = Timer.periodic(const Duration(seconds: 4), (_) {
-      if (_visibleStocks.isEmpty || _subscriptionOwnerId != ownerId) {
-        return;
-      }
-      final connectionStatus = state.connectionState.status;
-      unawaited(
-        handleVisibleStocksChanged(
-          ownerId: ownerId,
-          visibleStocks: _visibleStocks,
-          forceQuoteRefresh: true,
-          forceSubscriptionSync:
-              connectionStatus != KisRealtimeConnectionStatus.connected,
-        ),
-      );
-    });
-  }
-
-  Future<void> detachRealtime() async {
-    final ownerId = _subscriptionOwnerId;
-    _subscriptionOwnerId = null;
-    _visibleStocks = const <RankingStock>[];
-    _realtimeSubscription?.cancel();
-    _realtimeSubscription = null;
-    _connectionSubscription?.cancel();
-    _connectionSubscription = null;
-    _visibleQuoteRefreshTimer?.cancel();
-    _visibleQuoteRefreshTimer = null;
-    if (ownerId != null) {
-      await clearRealtimeSubscription(ownerId);
-    }
-  }
-
-  Future<void> syncDisplayedStocks({
-    required String ownerId,
-    required List<RankingStock> visibleStocks,
-    bool forceQuoteRefresh = false,
-    bool forceSubscriptionSync = false,
-  }) {
-    _visibleStocks = visibleStocks;
-    return handleVisibleStocksChanged(
-      ownerId: ownerId,
-      visibleStocks: visibleStocks,
-      forceQuoteRefresh: forceQuoteRefresh,
-      forceSubscriptionSync: forceSubscriptionSync,
-    );
   }
 
   Future<void> handleAppResumed() async {
-    final ownerId = _subscriptionOwnerId;
-    if (ownerId == null || _visibleStocks.isEmpty) {
+    if (_visibleStocks.isEmpty) {
       return;
     }
-    await handleVisibleStocksChanged(
-      ownerId: ownerId,
+    await _handleVisibleStocksChanged(
       visibleStocks: _visibleStocks,
-      forceQuoteRefresh: true,
       forceSubscriptionSync: true,
     );
   }
@@ -156,6 +103,10 @@ class StocksScreenViewModel extends Notifier<StocksScreenViewState> {
       return;
     }
     state = state.copyWith(searchQuery: query, visibleCount: pageSize);
+  }
+
+  void clearSearchQuery() {
+    updateSearchQuery('');
   }
 
   void updateMarket(String market) {
@@ -177,6 +128,7 @@ class StocksScreenViewModel extends Notifier<StocksScreenViewState> {
       return;
     }
     state = state.copyWith(showKrwForOverseas: value);
+    _rebuildDisplayVisibleStocks();
   }
 
   void loadMore(int totalCount) {
@@ -198,6 +150,7 @@ class StocksScreenViewModel extends Notifier<StocksScreenViewState> {
       ),
       lastRefreshTime: DateTime.now(),
     );
+    _rebuildDisplayVisibleStocks();
   }
 
   void updateConnectionState(KisRealtimeConnectionState connectionState) {
@@ -244,8 +197,37 @@ class StocksScreenViewModel extends Notifier<StocksScreenViewState> {
     }
   }
 
-  Future<void> handleVisibleStocksChanged({
-    required String ownerId,
+  Future<void> syncDisplayedStocks({
+    required List<RankingStock> visibleStocks,
+    required double? exchangeRate,
+    bool forceQuoteRefresh = false,
+    bool forceSubscriptionSync = false,
+    bool preserveExistingWhenLoading = false,
+  }) async {
+    if (preserveExistingWhenLoading) {
+      return;
+    }
+
+    _currentExchangeRate = exchangeRate;
+    final nextSignature = visibleStocks.map(stockKey).join('|');
+    if (!forceSubscriptionSync &&
+        state.visibleRealtimeSignature == nextSignature) {
+      _visibleStocks = visibleStocks;
+      _rebuildDisplayVisibleStocks();
+      return;
+    }
+
+    _visibleStocks = visibleStocks;
+    state = state.copyWith(visibleRealtimeSignature: nextSignature);
+    _rebuildDisplayVisibleStocks();
+    await _handleVisibleStocksChanged(
+      visibleStocks: visibleStocks,
+      forceQuoteRefresh: forceQuoteRefresh,
+      forceSubscriptionSync: forceSubscriptionSync,
+    );
+  }
+
+  Future<void> _handleVisibleStocksChanged({
     required List<RankingStock> visibleStocks,
     bool forceQuoteRefresh = false,
     bool forceSubscriptionSync = false,
@@ -254,10 +236,7 @@ class StocksScreenViewModel extends Notifier<StocksScreenViewState> {
     if (forceSubscriptionSync ||
         !sameCodes(state.subscribedRealtimeKeys, realtimeKeys)) {
       state = state.copyWith(subscribedRealtimeKeys: realtimeKeys);
-      await syncRealtimeSubscription(
-        ownerId: ownerId,
-        visibleStocks: visibleStocks,
-      );
+      await syncRealtimeSubscription(visibleStocks: visibleStocks);
     }
 
     await refreshVisibleQuotesIfNeeded(
@@ -281,17 +260,33 @@ class StocksScreenViewModel extends Notifier<StocksScreenViewState> {
       state = state.copyWith(
         liveQuoteStocks: Map<String, RankingStock>.from(liveQuotes),
       );
-    } catch (_) {
-      // Keep the current visible values when immediate live quote sync fails.
-    }
+      _rebuildDisplayVisibleStocks();
+    } catch (_) {}
   }
 
-  Future<void> clearRealtimeSubscription(String ownerId) {
+  Future<void> clearRealtimeSubscription() {
     state = state.copyWith(
       subscribedRealtimeKeys: const <String>{},
       requestedLiveQuoteKeys: const <String>{},
+      visibleRealtimeSignature: '',
+      displayVisibleStocks: const <RankingStock>[],
     );
-    return _realtimeService.clearSubscription(ownerId);
+    return _realtimeConf.clearSubscription(_subscriptionOwnerId);
+  }
+
+  void _rebuildDisplayVisibleStocks() {
+    final liveVisibleStocks = applyRealtimeStocks(
+      _visibleStocks,
+      liveDomesticPrices: state.liveDomesticPrices,
+      liveOverseasPrices: state.liveOverseasPrices,
+      liveQuoteStocks: state.liveQuoteStocks,
+    );
+    final displayVisibleStocks = applyDisplayCurrency(
+      liveVisibleStocks,
+      showKrwForOverseas: state.showKrwForOverseas,
+      exchangeRate: _currentExchangeRate,
+    );
+    state = state.copyWith(displayVisibleStocks: displayVisibleStocks);
   }
 
   List<RankingStock> sliceVisibleStocks(
@@ -407,7 +402,6 @@ class StocksScreenViewModel extends Notifier<StocksScreenViewState> {
   }
 
   Future<void> syncRealtimeSubscription({
-    required String ownerId,
     required List<RankingStock> visibleStocks,
   }) async {
     final domesticCodes = visibleStocks
@@ -418,18 +412,18 @@ class StocksScreenViewModel extends Notifier<StocksScreenViewState> {
         .map(
           (stock) => OverseasRealtimeTarget(
             code: stock.code,
-            exchangeCode: stock.exchangeCode ?? 'NAS',
+            exchangeCode: _normalizeOverseasExchangeCode(stock.exchangeCode),
           ),
         )
         .toList(growable: false);
 
     if (domesticCodes.isEmpty && overseasTargets.isEmpty) {
-      await _realtimeService.clearSubscription(ownerId);
+      await _realtimeConf.clearSubscription(_subscriptionOwnerId);
       return;
     }
 
-    await _realtimeService.setSubscription(
-      ownerId: ownerId,
+    await _realtimeConf.setSubscription(
+      ownerId: _subscriptionOwnerId,
       domesticCodes: domesticCodes,
       overseasTargets: overseasTargets,
       includeKospi: false,
@@ -452,7 +446,23 @@ class StocksScreenViewModel extends Notifier<StocksScreenViewState> {
     if (stock.marketType == StockMarketType.domestic) {
       return stock.code;
     }
-    return '${(stock.exchangeCode ?? 'NAS').toUpperCase()}:${stock.code.toUpperCase()}';
+    return '${_normalizeOverseasExchangeCode(stock.exchangeCode)}:${stock.code.toUpperCase()}';
+  }
+
+  String _normalizeOverseasExchangeCode(String? exchangeCode) {
+    switch ((exchangeCode ?? 'NAS').trim().toUpperCase()) {
+      case 'NASD':
+      case 'BAQ':
+        return 'NAS';
+      case 'NYSE':
+      case 'BAY':
+        return 'NYS';
+      case 'AMEX':
+      case 'BAA':
+        return 'AMS';
+      default:
+        return (exchangeCode ?? 'NAS').trim().toUpperCase();
+    }
   }
 
   String marketTitle(String market) {

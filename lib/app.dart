@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/theme/app_theme.dart';
 import 'providers/api_provider.dart';
-import 'views/screens/app_shell.dart';
+import 'views/screens/app_shell_view.dart';
 
 class MotuApp extends StatelessWidget {
   const MotuApp({super.key});
