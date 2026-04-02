@@ -120,7 +120,7 @@ class StocksMarketRepository {
               trId: 'HHDFS00000300',
               queryParameters: {
                 'AUTH': '',
-                'EXCD': stock.exchangeCode ?? 'NAS',
+                'EXCD': _normalizeOverseasExchangeCode(stock.exchangeCode),
                 'SYMB': stock.code,
               },
             );
@@ -222,7 +222,7 @@ class StocksMarketRepository {
           trId: 'HHDFS00000300',
           queryParameters: {
             'AUTH': '',
-            'EXCD': stock.exchangeCode ?? 'NAS',
+            'EXCD': _normalizeOverseasExchangeCode(stock.exchangeCode),
             'SYMB': stock.code,
           },
         );
@@ -702,7 +702,23 @@ class StocksMarketRepository {
   }
 
   String _stockKey(RankingStock stock) {
-    return '${stock.marketType.name}:${stock.exchangeCode ?? ''}:${stock.code}';
+    return '${stock.marketType.name}:${stock.marketType == StockMarketType.overseas ? _normalizeOverseasExchangeCode(stock.exchangeCode) : (stock.exchangeCode ?? '')}:${stock.code}';
+  }
+
+  String _normalizeOverseasExchangeCode(String? exchangeCode) {
+    switch ((exchangeCode ?? 'NAS').trim().toUpperCase()) {
+      case 'NASD':
+      case 'BAQ':
+        return 'NAS';
+      case 'NYSE':
+      case 'BAY':
+        return 'NYS';
+      case 'AMEX':
+      case 'BAA':
+        return 'AMS';
+      default:
+        return (exchangeCode ?? 'NAS').trim().toUpperCase();
+    }
   }
 
   int _toInt(dynamic value) {

@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
+
 import '../../models/stock_detail.dart';
 import 'kis_api_client.dart';
 
@@ -906,7 +908,7 @@ class KisRealtimeService {
   }
 
   void _updateOverseasPrice(List<String> record) {
-    if (record.length < 20) {
+    if (record.length < 21) {
       return;
     }
 
@@ -920,30 +922,47 @@ class KisRealtimeService {
     final parsedDecimals = _toInt(record[1]);
     final decimals = parsedDecimals > 0
         ? parsedDecimals
-        : _detectDecimalPlaces(record[10]);
-    final currentPrice = _scaledOverseasPrice(record[10], decimals);
-    final diffPrice = _scaledOverseasPrice(record[12], decimals);
-    final previousClosePrice = currentPrice - diffPrice;
+        : _detectDecimalPlaces(record[11]);
+    final currentPrice = _scaledOverseasPrice(record[11], decimals);
+    final diffPrice = _scaledOverseasPrice(record[13], decimals);
+    final signedDiffPrice = _applySignedOverseasDiff(
+      diffPrice,
+      sign: record[12],
+    );
+    final previousClosePrice = currentPrice - signedDiffPrice;
     final changeRate = previousClosePrice > 0
-        ? (diffPrice / previousClosePrice) * 100
-        : _toDouble(record[13]);
-    _overseasPriceByKey[_overseasKey(
-      exchangeCode,
-      code,
-    )] = RealtimeOverseasPrice(
+        ? (signedDiffPrice / previousClosePrice) * 100
+        : _toDouble(record[14]);
+    final key = _overseasKey(exchangeCode, code);
+    final previous = _overseasPriceByKey[key];
+    final next = RealtimeOverseasPrice(
       code: code,
       exchangeCode: exchangeCode,
       currentPrice: currentPrice,
       changeRate: changeRate,
       isPositive: previousClosePrice > 0
-          ? currentPrice >= previousClosePrice
-          : _isPositive(record[11], changeRate),
-      openPrice: _scaledOverseasPrice(record[7], decimals),
-      highPrice: _scaledOverseasPrice(record[8], decimals),
-      lowPrice: _scaledOverseasPrice(record[9], decimals),
-      volume: _toInt(record[19]),
+          ? signedDiffPrice >= 0
+          : _isPositive(record[12], changeRate),
+      openPrice: _scaledOverseasPrice(record[8], decimals),
+      highPrice: _scaledOverseasPrice(record[9], decimals),
+      lowPrice: _scaledOverseasPrice(record[10], decimals),
+      volume: _toInt(record[20]),
       priceDecimals: decimals,
     );
+    _overseasPriceByKey[key] = next;
+
+    if (kDebugMode &&
+        (previous == null ||
+            previous.currentPrice != next.currentPrice ||
+            previous.volume != next.volume ||
+            previous.priceDecimals != next.priceDecimals)) {
+      debugPrint(
+        '[Realtime][Overseas] key=$key currentRaw=${record[11]} current=${next.currentPrice} '
+        'diffRaw=${record[13]} diff=$signedDiffPrice sign=${record[12]} rateRaw=${record[14]} '
+        'volumeRaw=${record[20]} volume=${next.volume} decimals=${next.priceDecimals} '
+        'prevPrice=${previous?.currentPrice} prevVolume=${previous?.volume}',
+      );
+    }
   }
 
   void _updateOverseasOrderBook(List<String> record) {
@@ -1133,7 +1152,7 @@ class KisRealtimeService {
     required String exchangeCode,
     required String code,
   }) {
-    final normalizedExchange = exchangeCode.trim().toUpperCase();
+    final normalizedExchange = _normalizeOverseasExchangeCode(exchangeCode);
     final overseasSession = _currentOverseasRealtimeSession();
     if (overseasSession == _OverseasRealtimeSession.daytime) {
       final daytimeExchange = switch (normalizedExchange) {
@@ -1216,7 +1235,23 @@ class KisRealtimeService {
       'overseas:${_overseasKey(exchangeCode, code)}';
 
   String _overseasKey(String exchangeCode, String code) =>
-      '${exchangeCode.trim().toUpperCase()}:${code.trim().toUpperCase()}';
+      '${_normalizeOverseasExchangeCode(exchangeCode)}:${code.trim().toUpperCase()}';
+
+  String _normalizeOverseasExchangeCode(String exchangeCode) {
+    switch (exchangeCode.trim().toUpperCase()) {
+      case 'NASD':
+      case 'BAQ':
+        return 'NAS';
+      case 'NYSE':
+      case 'BAY':
+        return 'NYS';
+      case 'AMEX':
+      case 'BAA':
+        return 'AMS';
+      default:
+        return exchangeCode.trim().toUpperCase();
+    }
+  }
 
   void _updateConnectionState(KisRealtimeConnectionState nextState) {
     _connectionState = nextState;
@@ -1397,15 +1432,26 @@ class KisRealtimeService {
     return double.tryParse(rawValue.trim()) ?? 0.0;
   }
 
+  int _applySignedOverseasDiff(int diffPrice, {String? sign}) {
+    switch ((sign ?? '').trim()) {
+      case '4':
+      case '5':
+        return -diffPrice;
+      default:
+        return diffPrice;
+    }
+  }
+
   bool _isPositive(String? sign, double changeRate) {
     switch (sign) {
-      case '1':
       case '4':
       case '5':
         return false;
+      case '1':
       case '2':
-      case '3':
         return true;
+      case '3':
+        return false;
       default:
         return changeRate >= 0;
     }

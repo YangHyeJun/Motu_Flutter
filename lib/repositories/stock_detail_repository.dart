@@ -35,6 +35,10 @@ class StockDetailRepository {
     final quote =
         quoteResponse['output'] as Map<String, dynamic>? ?? <String, dynamic>{};
     final chartEntries = await _fetchChartEntries(code: code, period: period);
+    final orderBook = await fetchLiveOrderBook(
+      code: code,
+      marketType: StockMarketType.domestic,
+    );
 
     final latestChart = chartEntries.isEmpty ? null : chartEntries.last;
     final changeRate = _toDouble(quote['prdy_ctrt']) == 0 && latestChart != null
@@ -77,6 +81,11 @@ class StockDetailRepository {
       currentPrice: _toInt(quote['stck_prpr']) == 0 && latestChart != null
           ? latestChart.closePrice
           : _toInt(quote['stck_prpr']),
+      previousClosePrice: _resolveDomesticPreviousClosePrice(
+        currentPrice: _toInt(quote['stck_prpr']),
+        rawDiff: _toInt(quote['prdy_vrss']),
+        sign: quote['prdy_vrss_sign'] as String?,
+      ),
       changeRate: changeRate,
       isPositive: _isPositive(quote['prdy_vrss_sign'] as String?, changeRate),
       openPrice: _toInt(quote['stck_oprc']),
@@ -87,6 +96,7 @@ class StockDetailRepository {
       availableBuyQuantity: availableBuyQuantity,
       availableCash: availableCash,
       marketLabel: '국내',
+      orderBook: orderBook,
     );
   }
 
@@ -144,6 +154,7 @@ class StockDetailRepository {
       code: code,
       marketType: StockMarketType.overseas,
       currentPrice: effectiveCurrentPrice,
+      previousClosePrice: previousClosePrice,
       changeRate: changeRate,
       isPositive: _resolveOverseasIsPositive(
         currentPrice: effectiveCurrentPrice,
@@ -211,6 +222,7 @@ class StockDetailRepository {
 
       return StockLiveQuote(
         currentPrice: currentPrice,
+        previousClosePrice: previousClosePrice,
         changeRate: changeRate,
         isPositive: _resolveOverseasIsPositive(
           currentPrice: currentPrice,
@@ -237,6 +249,11 @@ class StockDetailRepository {
 
     return StockLiveQuote(
       currentPrice: _toInt(quote['stck_prpr']),
+      previousClosePrice: _resolveDomesticPreviousClosePrice(
+        currentPrice: _toInt(quote['stck_prpr']),
+        rawDiff: _toInt(quote['prdy_vrss']),
+        sign: quote['prdy_vrss_sign'] as String?,
+      ),
       changeRate: changeRate,
       isPositive: _isPositive(quote['prdy_vrss_sign'] as String?, changeRate),
       openPrice: _toInt(quote['stck_oprc']),
@@ -680,6 +697,7 @@ class StockDetailRepository {
       'ORD_DVSN': orderType.orderDivision,
       'ORD_QTY': '$quantity',
       'ORD_UNPR': orderType.orderPrice,
+      'EXCG_ID_DVSN_CD': 'KRX',
     };
     if (includeSellType) {
       body['SLL_TYPE'] = '01';
@@ -854,6 +872,20 @@ class StockDetailRepository {
       return currentPrice >= previousClosePrice;
     }
     return _isPositive(sign, fallbackRate);
+  }
+
+  int _resolveDomesticPreviousClosePrice({
+    required int currentPrice,
+    required int rawDiff,
+    required String? sign,
+  }) {
+    if (currentPrice <= 0) {
+      return 0;
+    }
+    final normalizedSign = (sign ?? '').trim();
+    final signedDiff = normalizedSign == '5' ? -rawDiff : rawDiff;
+    final previousClosePrice = currentPrice - signedDiff;
+    return previousClosePrice > 0 ? previousClosePrice : 0;
   }
 
   double _deriveChangeRate(List<StockChartEntry> entries) {

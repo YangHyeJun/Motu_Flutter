@@ -6,6 +6,7 @@ class StockDetail {
     required this.code,
     required this.marketType,
     required this.currentPrice,
+    required this.previousClosePrice,
     required this.changeRate,
     required this.isPositive,
     required this.openPrice,
@@ -29,6 +30,7 @@ class StockDetail {
   final String code;
   final StockMarketType marketType;
   final int currentPrice;
+  final int previousClosePrice;
   final double changeRate;
   final bool isPositive;
   final int openPrice;
@@ -77,6 +79,7 @@ class StockDetail {
     String? code,
     StockMarketType? marketType,
     int? currentPrice,
+    int? previousClosePrice,
     double? changeRate,
     bool? isPositive,
     int? openPrice,
@@ -100,6 +103,7 @@ class StockDetail {
       code: code ?? this.code,
       marketType: marketType ?? this.marketType,
       currentPrice: currentPrice ?? this.currentPrice,
+      previousClosePrice: previousClosePrice ?? this.previousClosePrice,
       changeRate: changeRate ?? this.changeRate,
       isPositive: isPositive ?? this.isPositive,
       openPrice: openPrice ?? this.openPrice,
@@ -124,6 +128,7 @@ class StockDetail {
 class StockLiveQuote {
   const StockLiveQuote({
     required this.currentPrice,
+    required this.previousClosePrice,
     required this.changeRate,
     required this.isPositive,
     required this.openPrice,
@@ -134,6 +139,7 @@ class StockLiveQuote {
   });
 
   final int currentPrice;
+  final int previousClosePrice;
   final double changeRate;
   final bool isPositive;
   final int openPrice;

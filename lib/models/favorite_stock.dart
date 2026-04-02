@@ -31,7 +31,7 @@ class FavoriteStock {
     if (marketType == StockMarketType.domestic) {
       return code.trim().toUpperCase();
     }
-    return '${(exchangeCode ?? 'NAS').trim().toUpperCase()}:${code.trim().toUpperCase()}';
+    return '${_normalizeOverseasExchangeCode(exchangeCode)}:${code.trim().toUpperCase()}';
   }
 
   FavoriteStock copyWith({
@@ -139,5 +139,21 @@ class FavoriteStock {
       currencySymbol: currencySymbol,
       priceDecimals: priceDecimals,
     );
+  }
+
+  static String _normalizeOverseasExchangeCode(String? exchangeCode) {
+    switch ((exchangeCode ?? 'NAS').trim().toUpperCase()) {
+      case 'NASD':
+      case 'BAQ':
+        return 'NAS';
+      case 'NYSE':
+      case 'BAY':
+        return 'NYS';
+      case 'AMEX':
+      case 'BAA':
+        return 'AMS';
+      default:
+        return (exchangeCode ?? 'NAS').trim().toUpperCase();
+    }
   }
 }
