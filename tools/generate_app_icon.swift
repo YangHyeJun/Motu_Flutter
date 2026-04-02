@@ -43,139 +43,126 @@ context.drawLinearGradient(
     options: []
 )
 
-let glowRect = CGRect(x: 540, y: 520, width: 360, height: 360)
+let glowRect = CGRect(x: 460, y: 380, width: 440, height: 440)
 context.saveGState()
 context.setShadow(
     offset: CGSize(width: 0, height: 0),
-    blur: 90,
-    color: color(0x16D68A, alpha: 0.55).cgColor
+    blur: 110,
+    color: color(0x16D68A, alpha: 0.62).cgColor
 )
-context.setFillColor(color(0x16D68A, alpha: 0.32).cgColor)
+context.setFillColor(color(0x16D68A, alpha: 0.36).cgColor)
 context.fillEllipse(in: glowRect)
 context.restoreGState()
 
 context.saveGState()
-let framePath = NSBezierPath(roundedRect: CGRect(x: 150, y: 150, width: 724, height: 724), xRadius: 180, yRadius: 180)
+let framePath = NSBezierPath(
+    roundedRect: CGRect(x: 72, y: 72, width: 880, height: 880),
+    xRadius: 230,
+    yRadius: 230
+)
 context.setStrokeColor(color(0xFFFFFF, alpha: 0.10).cgColor)
-context.setLineWidth(10)
+context.setLineWidth(8)
 context.addPath(framePath.cgPath)
 context.strokePath()
 context.restoreGState()
 
 context.setStrokeColor(color(0xFFFFFF, alpha: 0.10).cgColor)
-context.setLineWidth(8)
+context.setLineWidth(10)
 for offset in [0, 1, 2] {
-    let y = CGFloat(330 + (offset * 110))
-    context.move(to: CGPoint(x: 250, y: y))
-    context.addLine(to: CGPoint(x: 774, y: y))
+    let y = CGFloat(284 + (offset * 160))
+    context.move(to: CGPoint(x: 144, y: y))
+    context.addLine(to: CGPoint(x: 880, y: y))
     context.strokePath()
 }
 for offset in [0, 1, 2] {
-    let x = CGFloat(290 + (offset * 150))
-    context.move(to: CGPoint(x: x, y: 250))
-    context.addLine(to: CGPoint(x: x, y: 774))
+    let x = CGFloat(212 + (offset * 200))
+    context.move(to: CGPoint(x: x, y: 144))
+    context.addLine(to: CGPoint(x: x, y: 880))
     context.strokePath()
 }
 
 func drawBar(x: CGFloat, low: CGFloat, high: CGFloat, open: CGFloat, close: CGFloat, bodyColor: NSColor) {
     context.setStrokeColor(color(0xF3F5F7, alpha: 0.95).cgColor)
-    context.setLineWidth(20)
+    context.setLineWidth(24)
     context.setLineCap(.round)
     context.move(to: CGPoint(x: x, y: low))
     context.addLine(to: CGPoint(x: x, y: high))
     context.strokePath()
 
     let bodyY = min(open, close)
-    let bodyHeight = max(abs(close - open), 36)
-    let rect = CGRect(x: x - 42, y: bodyY, width: 84, height: bodyHeight)
-    let path = NSBezierPath(roundedRect: rect, xRadius: 28, yRadius: 28)
+    let bodyHeight = max(abs(close - open), 48)
+    let rect = CGRect(x: x - 52, y: bodyY, width: 104, height: bodyHeight)
+    let path = NSBezierPath(roundedRect: rect, xRadius: 34, yRadius: 34)
     context.setFillColor(bodyColor.cgColor)
     context.addPath(path.cgPath)
     context.fillPath()
 }
 
 drawBar(
-    x: 360,
-    low: 360,
-    high: 610,
-    open: 420,
-    close: 540,
+    x: 270,
+    low: 248,
+    high: 658,
+    open: 326,
+    close: 542,
     bodyColor: color(0xFFFFFF, alpha: 0.92)
 )
 drawBar(
-    x: 520,
-    low: 300,
-    high: 700,
-    open: 380,
-    close: 640,
+    x: 512,
+    low: 176,
+    high: 824,
+    open: 308,
+    close: 706,
     bodyColor: color(0x16D68A, alpha: 1.0)
 )
 drawBar(
-    x: 680,
-    low: 430,
-    high: 790,
-    open: 500,
-    close: 720,
+    x: 754,
+    low: 360,
+    high: 894,
+    open: 438,
+    close: 792,
     bodyColor: color(0xFFFFFF, alpha: 0.92)
 )
 
 let linePath = NSBezierPath()
-linePath.move(to: CGPoint(x: 250, y: 350))
+linePath.move(to: CGPoint(x: 118, y: 214))
 linePath.curve(
-    to: CGPoint(x: 370, y: 470),
-    controlPoint1: CGPoint(x: 285, y: 370),
-    controlPoint2: CGPoint(x: 325, y: 415)
+    to: CGPoint(x: 286, y: 406),
+    controlPoint1: CGPoint(x: 160, y: 246),
+    controlPoint2: CGPoint(x: 214, y: 334)
 )
 linePath.curve(
-    to: CGPoint(x: 535, y: 430),
-    controlPoint1: CGPoint(x: 420, y: 525),
-    controlPoint2: CGPoint(x: 475, y: 455)
+    to: CGPoint(x: 470, y: 338),
+    controlPoint1: CGPoint(x: 340, y: 486),
+    controlPoint2: CGPoint(x: 394, y: 372)
 )
 linePath.curve(
-    to: CGPoint(x: 760, y: 760),
-    controlPoint1: CGPoint(x: 615, y: 430),
-    controlPoint2: CGPoint(x: 700, y: 645)
+    to: CGPoint(x: 916, y: 896),
+    controlPoint1: CGPoint(x: 626, y: 336),
+    controlPoint2: CGPoint(x: 804, y: 742)
 )
 
 context.saveGState()
 context.setShadow(
     offset: CGSize(width: 0, height: 16),
-    blur: 30,
-    color: color(0x16D68A, alpha: 0.45).cgColor
+    blur: 42,
+    color: color(0x16D68A, alpha: 0.5).cgColor
 )
 context.addPath(linePath.cgPath)
 context.setStrokeColor(color(0x16D68A).cgColor)
-context.setLineWidth(34)
+context.setLineWidth(44)
 context.setLineCap(.round)
 context.setLineJoin(.round)
 context.strokePath()
 context.restoreGState()
 
 let arrowPath = NSBezierPath()
-arrowPath.move(to: CGPoint(x: 710, y: 755))
-arrowPath.line(to: CGPoint(x: 822, y: 782))
-arrowPath.line(to: CGPoint(x: 778, y: 676))
+arrowPath.move(to: CGPoint(x: 844, y: 888))
+arrowPath.line(to: CGPoint(x: 972, y: 922))
+arrowPath.line(to: CGPoint(x: 924, y: 792))
 arrowPath.close()
 context.setFillColor(color(0x16D68A).cgColor)
 context.addPath(arrowPath.cgPath)
 context.fillPath()
-
-let badgeRect = CGRect(x: 220, y: 730, width: 165, height: 84)
-let badgePath = NSBezierPath(roundedRect: badgeRect, xRadius: 34, yRadius: 34)
-context.setFillColor(color(0xFFFFFF, alpha: 0.92).cgColor)
-context.addPath(badgePath.cgPath)
-context.fillPath()
-
-let badgeText = "M"
-let paragraph = NSMutableParagraphStyle()
-paragraph.alignment = .center
-let attributes: [NSAttributedString.Key: Any] = [
-    .font: NSFont.systemFont(ofSize: 54, weight: .black),
-    .foregroundColor: color(0x101315),
-    .paragraphStyle: paragraph,
-]
-let attributed = NSAttributedString(string: badgeText, attributes: attributes)
-attributed.draw(in: CGRect(x: 220, y: 744, width: 165, height: 60))
 
 image.unlockFocus()
 
