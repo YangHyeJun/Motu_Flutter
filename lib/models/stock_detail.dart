@@ -16,6 +16,7 @@ class StockDetail {
     required this.chartEntries,
     required this.availableBuyQuantity,
     required this.availableCash,
+    this.buyOrderCapacityErrorMessage,
     this.exchangeCode,
     this.marketLabel = '',
     this.currencySymbol = '원',
@@ -40,6 +41,7 @@ class StockDetail {
   final List<StockChartEntry> chartEntries;
   final int availableBuyQuantity;
   final int availableCash;
+  final String? buyOrderCapacityErrorMessage;
   final String? exchangeCode;
   final String marketLabel;
   final String currencySymbol;
@@ -89,6 +91,7 @@ class StockDetail {
     List<StockChartEntry>? chartEntries,
     int? availableBuyQuantity,
     int? availableCash,
+    String? buyOrderCapacityErrorMessage,
     String? exchangeCode,
     String? marketLabel,
     String? currencySymbol,
@@ -113,6 +116,8 @@ class StockDetail {
       chartEntries: chartEntries ?? this.chartEntries,
       availableBuyQuantity: availableBuyQuantity ?? this.availableBuyQuantity,
       availableCash: availableCash ?? this.availableCash,
+      buyOrderCapacityErrorMessage:
+          buyOrderCapacityErrorMessage ?? this.buyOrderCapacityErrorMessage,
       exchangeCode: exchangeCode ?? this.exchangeCode,
       marketLabel: marketLabel ?? this.marketLabel,
       currencySymbol: currencySymbol ?? this.currencySymbol,

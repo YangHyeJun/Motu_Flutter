@@ -46,6 +46,7 @@ class StockDetailRepository {
         : _toDouble(quote['prdy_ctrt']);
     var availableBuyQuantity = 0;
     var availableCash = 0;
+    String? buyOrderCapacityErrorMessage;
 
     if (_account.isConfigured) {
       try {
@@ -66,11 +67,19 @@ class StockDetailRepository {
         final output =
             buyableResponse['output'] as Map<String, dynamic>? ??
             <String, dynamic>{};
-        availableBuyQuantity = _toInt(output['nrcvb_buy_qty']);
-        availableCash = _toInt(output['ord_psbl_cash']);
-      } on KisApiException {
+        availableBuyQuantity = _firstPositiveInt([
+          output['nrcvb_buy_qty'],
+          output['max_buy_qty'],
+          output['ord_psbl_qty'],
+        ]);
+        availableCash = _firstPositiveInt([
+          output['ord_psbl_cash'],
+          output['ord_psbl_frcr_amt_wcrc'],
+        ]);
+      } on KisApiException catch (error) {
         availableBuyQuantity = 0;
         availableCash = 0;
+        buyOrderCapacityErrorMessage = error.message;
       }
     }
 
@@ -95,6 +104,7 @@ class StockDetailRepository {
       chartEntries: chartEntries,
       availableBuyQuantity: availableBuyQuantity,
       availableCash: availableCash,
+      buyOrderCapacityErrorMessage: buyOrderCapacityErrorMessage,
       marketLabel: '국내',
       orderBook: orderBook,
     );
@@ -175,6 +185,7 @@ class StockDetailRepository {
       chartEntries: chartEntries,
       availableBuyQuantity: 0,
       availableCash: 0,
+      buyOrderCapacityErrorMessage: null,
       exchangeCode: exchangeCode,
       marketLabel: _overseasMarketLabel(exchangeCode),
       currencySymbol: r'$',
@@ -646,7 +657,6 @@ class StockDetailRepository {
     required int price,
   }) async {
     _ensureOrderableAccount();
-    _ensureDomesticCashOrderSession();
     await _ensureBuyOrderCapacity(
       code: code,
       quantity: quantity,
@@ -669,7 +679,6 @@ class StockDetailRepository {
     required int price,
   }) async {
     _ensureOrderableAccount();
-    _ensureDomesticCashOrderSession();
 
     final response = await _postCashOrder(
       code: code,
@@ -728,17 +737,6 @@ class StockDetailRepository {
     }
   }
 
-  void _ensureDomesticCashOrderSession() {
-    if (_isDomesticRegularSession(DateTime.now())) {
-      return;
-    }
-
-    throw const KisApiException(
-      '국내 주식 정규장 시간이 아니어서 주문할 수 없습니다. 정규장(평일 09:00~15:30)에 다시 시도해주세요.',
-      apiCode: 'MARKET_CLOSED',
-    );
-  }
-
   Future<void> _ensureBuyOrderCapacity({
     required String code,
     required int quantity,
@@ -794,17 +792,6 @@ class StockDetailRepository {
       orderDivision: isLimitOrder ? '00' : '01',
       orderPrice: isLimitOrder ? '$sanitizedPrice' : '0',
     );
-  }
-
-  bool _isDomesticRegularSession(DateTime now) {
-    if (now.weekday == DateTime.saturday || now.weekday == DateTime.sunday) {
-      return false;
-    }
-
-    final minuteOfDay = (now.hour * 60) + now.minute;
-    const marketOpenMinute = 9 * 60;
-    const marketCloseMinute = (15 * 60) + 30;
-    return minuteOfDay >= marketOpenMinute && minuteOfDay < marketCloseMinute;
   }
 
   int _toInt(dynamic value) {

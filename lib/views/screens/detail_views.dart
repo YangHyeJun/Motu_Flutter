@@ -1638,6 +1638,7 @@ class _TradeOrderScreenState extends ConsumerState<_TradeOrderScreen> {
     final volume = _realtimeVolume ?? detail?.volume ?? 0;
     final availableBuyQuantity = detail?.availableBuyQuantity ?? 0;
     final availableCash = detail?.availableCash ?? 0;
+    final buyOrderCapacityErrorMessage = detail?.buyOrderCapacityErrorMessage;
     final availableSellQuantity =
         holding?.quantity ?? widget.initialHoldingQuantity;
     final maxQuantity = widget.mode == _TradeMode.buy
@@ -1649,21 +1650,16 @@ class _TradeOrderScreenState extends ConsumerState<_TradeOrderScreen> {
     final totalAmount = quantity > 0 && selectedPrice > 0
         ? quantity * selectedPrice
         : 0;
-    final hasValidOrderBookPrice =
-        orderBook.isNotEmpty && orderBook.any((level) {
-          final candidate = widget.mode == _TradeMode.buy
-              ? level.askPrice
-              : level.bidPrice;
-          return candidate == selectedPrice && candidate > 0;
-        });
+    final canSubmitBuyOrder =
+        buyOrderCapacityErrorMessage != null || quantity <= maxQuantity;
     final canSubmit =
         !_isSubmitting &&
         detail != null &&
         quantity > 0 &&
-        maxQuantity > 0 &&
-        quantity <= maxQuantity &&
         selectedPrice > 0 &&
-        hasValidOrderBookPrice;
+        (widget.mode == _TradeMode.buy
+            ? canSubmitBuyOrder
+            : maxQuantity > 0 && quantity <= maxQuantity);
 
     return Scaffold(
       appBar: AppBar(
@@ -1976,6 +1972,15 @@ class _TradeOrderScreenState extends ConsumerState<_TradeOrderScreen> {
                           color: AppColors.textSecondary,
                         ),
                       ),
+                      if (buyOrderCapacityErrorMessage != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          buyOrderCapacityErrorMessage,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: AppColors.negative,
+                          ),
+                        ),
+                      ],
                     ],
                     const SizedBox(height: 14),
                     _TradeSummaryRow(
@@ -2044,32 +2049,6 @@ class _TradeOrderScreenState extends ConsumerState<_TradeOrderScreen> {
   }
 
   Future<void> _submitOrder(int quantity, int price) async {
-    final orderBook = _liveOrderBook.isNotEmpty
-        ? _liveOrderBook
-        : ref
-              .read(
-                stockDetailProvider((
-                  code: widget.stockCode,
-                  name: widget.stockName,
-                  period: StockChartPeriod.oneDay,
-                  marketType: StockMarketType.domestic,
-                  exchangeCode: null,
-                )),
-              )
-              .valueOrNull
-              ?.orderBook ??
-          const <StockOrderBookLevel>[];
-    final hasValidOrderBookPrice = orderBook.any((level) {
-      final candidate = widget.mode == _TradeMode.buy
-          ? level.askPrice
-          : level.bidPrice;
-      return candidate == price && candidate > 0;
-    });
-    if (!hasValidOrderBookPrice) {
-      _showQuantityToast('실시간 호가를 확인한 뒤 다시 주문해주세요.');
-      return;
-    }
-
     _dismissKeyboard();
     setState(() {
       _isSubmitting = true;
