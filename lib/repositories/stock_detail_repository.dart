@@ -79,7 +79,9 @@ class StockDetailRepository {
       } on KisApiException catch (error) {
         availableBuyQuantity = 0;
         availableCash = 0;
-        buyOrderCapacityErrorMessage = error.message;
+        buyOrderCapacityErrorMessage = error.toUserMessage(
+          includeCodeForUnknown: false,
+        );
       }
     }
 
